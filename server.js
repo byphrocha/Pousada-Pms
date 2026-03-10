@@ -1,11 +1,17 @@
-const express  = require("express");
-const https    = require("https");
-const http     = require("http");
-const fs       = require("fs");
-const path     = require("path");
+const express = require("express");
+const https   = require("https");
+const http    = require("http");
+const path    = require("path");
+const { createClient } = require("@supabase/supabase-js");
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// ─── Supabase ─────────────────────────────────────────────────────────────────
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "build")));
@@ -19,21 +25,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── Persistência ────────────────────────────────────────────────────────────────
-const DATA_FILE = path.join(__dirname, "data.json");
-
-function readData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch {}
-  return { reservations: [], icalUrls: { booking: {}, airbnb: {} } };
-}
-function writeData(data) {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2)); }
-  catch (e) { console.error("Erro ao salvar:", e); }
-}
-
-// ─── Utilitários iCal ────────────────────────────────────────────────────────────
+// ─── Utilitários iCal ─────────────────────────────────────────────────────────
 function parseIcal(text) {
   const events = [];
   const blocks  = text.split("BEGIN:VEVENT");
@@ -55,7 +47,6 @@ function fetchUrl(url) {
     const lib = url.startsWith("https") ? https : http;
     let body = "";
     lib.get(url, { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
-      // Segue redirecionamentos
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return fetchUrl(res.headers.location).then(resolve).catch(reject);
       }
@@ -67,94 +58,118 @@ function fetchUrl(url) {
 
 function genId() { return Math.random().toString(36).slice(2, 10); }
 
-// ─── Reservas ────────────────────────────────────────────────────────────────────
-app.get("/reservations", (req, res) => {
-  res.json(readData().reservations);
+// ─── Health check (mantém servidor acordado no Render) ────────────────────────
+app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+// ─── Reservas ─────────────────────────────────────────────────────────────────
+app.get("/reservations", async (req, res) => {
+  const { data, error } = await supabase.from("reservations").select("*").order("check_in");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
-app.post("/reservations", (req, res) => {
-  const data = readData();
-  const r    = { ...req.body, id: req.body.id || genId(), createdAt: req.body.createdAt || new Date().toISOString() };
-  if (r.externalUid && data.reservations.find(x => x.externalUid === r.externalUid)) {
-    return res.json({ ok: false, reason: "duplicate" });
+app.post("/reservations", async (req, res) => {
+  const b = req.body;
+  // Evitar duplicata por externalUid
+  if (b.externalUid) {
+    const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
+    if (exists) return res.json({ ok: false, reason: "duplicate" });
   }
-  data.reservations.push(r);
-  writeData(data);
-  res.json({ ok: true, reservation: r });
+  const row = {
+    id:           b.id || genId(),
+    room_id:      b.roomId,
+    guest_name:   b.guestName,
+    check_in:     b.checkIn,
+    check_out:    b.checkOut,
+    source:       b.source || "direto",
+    adults:       b.adults || 2,
+    children:     b.children || 0,
+    phone:        b.phone || "",
+    notes:        b.notes || "",
+    status:       b.status || "confirmed",
+    external_uid: b.externalUid || null,
+    created_at:   b.createdAt || new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from("reservations").insert(row).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, reservation: data });
 });
 
-app.put("/reservations/:id", (req, res) => {
-  const data = readData();
-  const idx  = data.reservations.findIndex(r => r.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: "not found" });
-  data.reservations[idx] = { ...data.reservations[idx], ...req.body };
-  writeData(data);
+app.put("/reservations/:id", async (req, res) => {
+  const b = req.body;
+  const row = {
+    room_id:    b.roomId,
+    guest_name: b.guestName,
+    check_in:   b.checkIn,
+    check_out:  b.checkOut,
+    source:     b.source,
+    adults:     b.adults,
+    children:   b.children,
+    phone:      b.phone,
+    notes:      b.notes,
+    status:     b.status,
+  };
+  const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
-app.delete("/reservations/:id", (req, res) => {
-  const data = readData();
-  data.reservations = data.reservations.filter(r => r.id !== req.params.id);
-  writeData(data);
+app.delete("/reservations/:id", async (req, res) => {
+  const { error } = await supabase.from("reservations").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
-// ─── URLs iCal ───────────────────────────────────────────────────────────────────
-app.get("/urls", (req, res) => {
-  const data = readData();
-  res.json(data.icalUrls || { booking: {}, airbnb: {} });
+// ─── URLs iCal ────────────────────────────────────────────────────────────────
+app.get("/urls", async (req, res) => {
+  const { data } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
+  res.json(data?.value || { booking: {}, airbnb: {} });
 });
 
-app.post("/urls", (req, res) => {
-  const data = readData();
-  data.icalUrls = req.body;
-  writeData(data);
+app.post("/urls", async (req, res) => {
+  await supabase.from("settings").upsert({ key: "ical_urls", value: req.body });
   res.json({ ok: true });
 });
 
-// ─── Sincronização iCal ───────────────────────────────────────────────────────────
+// ─── Sincronização iCal ───────────────────────────────────────────────────────
 app.post("/sync", async (req, res) => {
-  const data = readData();
-  const log  = ["⏳ Iniciando sincronização..."];
-  let added  = 0;
+  const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
+  const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
+  const log = ["⏳ Iniciando sincronização..."];
+  let added = 0;
 
-  for (const [source, urls] of Object.entries(data.icalUrls || {})) {
+  for (const [source, urls] of Object.entries(icalUrls)) {
     for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
       log.push(`🔍 ${source} — Quarto ${roomId}`);
       try {
         const text = await fetchUrl(url);
-        if (!text.includes("BEGIN:VCALENDAR")) {
-          log.push(`   ⚠️ Resposta inválida (não é iCal)`);
-          continue;
-        }
+        if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
         const evts = parseIcal(text);
         log.push(`   → ${evts.length} evento(s)`);
         for (const ev of evts) {
           const uid = `${source}-${roomId}-${ev.uid}`;
-          if (data.reservations.find(r => r.externalUid === uid)) continue;
-          data.reservations.push({
-            id: genId(), roomId, externalUid: uid, status: "confirmed",
-            guestName:  ev.summary || `${source} reserva`,
-            checkIn:    ev.checkIn, checkOut: ev.checkOut,
+          const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", uid).single();
+          if (exists) continue;
+          await supabase.from("reservations").insert({
+            id: genId(), room_id: roomId, external_uid: uid, status: "confirmed",
+            guest_name:  ev.summary || `${source} reserva`,
+            check_in:    ev.checkIn, check_out: ev.checkOut,
             source, adults: 2, children: 0, phone: "",
-            notes: "Importado via iCal", createdAt: new Date().toISOString(),
+            notes: "Importado via iCal", created_at: new Date().toISOString(),
           });
           log.push(`   ✓ ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
           added++;
         }
-      } catch(e) {
-        log.push(`   ✗ Erro: ${e.message}`);
-      }
+      } catch(e) { log.push(`   ✗ Erro: ${e.message}`); }
     }
   }
 
-  writeData(data);
-  log.push(`✅ Concluído — ${added} nova(s) reserva(s) importada(s)`);
+  log.push(`✅ Concluído — ${added} nova(s) reserva(s)`);
   res.json({ ok: true, log, added });
 });
 
-// ─── Proxy iCal (teste pontual) ────────────────────────────────────────────────────
+// ─── Proxy iCal ───────────────────────────────────────────────────────────────
 app.get("/proxy-ical", async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send("Parâmetro 'url' obrigatório");
@@ -164,14 +179,13 @@ app.get("/proxy-ical", async (req, res) => {
     const text = await fetchUrl(url);
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
     res.send(text);
-  } catch(e) {
-    res.status(500).send("Erro: " + e.message);
-  }
+  } catch(e) { res.status(500).send("Erro: " + e.message); }
 });
 
-// ─── Fallback SPA ─────────────────────────────────────────────────────────────────
+// ─── Fallback SPA ─────────────────────────────────────────────────────────────
 app.get("*", (req, res) => {
   const idx = path.join(__dirname, "build", "index.html");
+  const fs  = require("fs");
   if (fs.existsSync(idx)) res.sendFile(idx);
   else res.send("PMS Pousada — servidor OK 🏡");
 });
