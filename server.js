@@ -1,256 +1,181 @@
 const express  = require("express");
-const cors     = require("cors");
-const cron     = require("node-cron");
-const fs       = require("fs");
 const https    = require("https");
 const http     = require("http");
+const fs       = require("fs");
+const path     = require("path");
 
-const app      = express();
-const PORT     = process.env.PORT || 3000;
-const DATA_FILE = "./data.json";
+const app  = express();
+const PORT = process.env.PORT || 3000;
 
-app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "build")));
 
-// ─── Persistent storage ───────────────────────────────────────────────────────
-let data = {
-  urls: { booking: {}, airbnb: {} },
-  reservations: [],
-  lastSync: null,
-  syncLog: [],
-};
+// CORS
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin",  "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
-function loadData() {
-  if (fs.existsSync(DATA_FILE)) {
-    try {
-      data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-      console.log("✅ Dados carregados:", data.reservations.length, "reservas");
-    } catch (e) {
-      console.error("Erro ao carregar dados:", e.message);
-    }
-  }
+// ─── Persistência ────────────────────────────────────────────────────────────────
+const DATA_FILE = path.join(__dirname, "data.json");
+
+function readData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {}
+  return { reservations: [], icalUrls: { booking: {}, airbnb: {} } };
+}
+function writeData(data) {
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2)); }
+  catch (e) { console.error("Erro ao salvar:", e); }
 }
 
-function saveData() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-}
-
-// ─── iCal parser ─────────────────────────────────────────────────────────────
+// ─── Utilitários iCal ────────────────────────────────────────────────────────────
 function parseIcal(text) {
   const events = [];
-  const blocks = text.split("BEGIN:VEVENT");
-
+  const blocks  = text.split("BEGIN:VEVENT");
   const parseDate = (s) => {
-    const clean = s.replace(/[TZ\r\n]/g, "").slice(0, 8);
-    return `${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}`;
+    const c = s.replace(/[TZ]/g, "").slice(0, 8);
+    return `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`;
   };
-
   for (let i = 1; i < blocks.length; i++) {
     const b   = blocks[i];
-    const get = (key) => {
-      const m = b.match(new RegExp(key + "[^:]*:([^\r\n]+)"));
-      return m ? m[1].trim() : "";
-    };
-    const dtstart = get("DTSTART");
-    const dtend   = get("DTEND");
-    const summary = get("SUMMARY");
-    const uid     = get("UID");
-    if (dtstart && dtend) {
-      events.push({
-        uid:     uid || `evt-${i}`,
-        summary: summary || "Reserva",
-        checkIn:  parseDate(dtstart),
-        checkOut: parseDate(dtend),
-      });
-    }
+    const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:([^\r\n]+")); return m ? m[1].trim() : ""; };
+    const dtstart = get("DTSTART"), dtend = get("DTEND"), summary = get("SUMMARY"), uid = get("UID");
+    if (dtstart && dtend) events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
   }
   return events;
 }
 
-
-// ─── HTTP fetch com headers de browser para evitar bloqueios ─────────────────
-const BROWSER_HEADERS = {
-  "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  "Accept":          "text/calendar, text/plain, */*",
-  "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-  "Cache-Control":   "no-cache",
-  "Pragma":          "no-cache",
-  "Connection":      "keep-alive",
-};
-
-function fetchUrl(url, redirectCount = 0) {
-  if (redirectCount > 5) return Promise.reject(new Error("Muitos redirecionamentos"));
+function fetchUrl(url) {
   return new Promise((resolve, reject) => {
-    const lib    = url.startsWith("https") ? https : http;
-    const parsed = new URL(url);
-    const options = {
-      hostname: parsed.hostname,
-      path:     parsed.pathname + parsed.search,
-      method:   "GET",
-      headers:  Object.assign({}, BROWSER_HEADERS, { "Host": parsed.hostname }),
-      timeout:  20000,
-    };
-    const req = lib.request(options, (res) => {
+    const lib = url.startsWith("https") ? https : http;
+    let body = "";
+    lib.get(url, { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
+      // Segue redirecionamentos
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const loc = res.headers.location;
-        const next = loc.startsWith("http") ? loc : parsed.protocol + "//" + parsed.hostname + loc;
-        return fetchUrl(next, redirectCount + 1).then(resolve).catch(reject);
+        return fetchUrl(res.headers.location).then(resolve).catch(reject);
       }
-      if (res.statusCode !== 200) {
-        return reject(new Error("HTTP " + res.statusCode));
-      }
-      const zlib = require("zlib");
-      const enc  = res.headers["content-encoding"];
-      let stream = res;
-      if (enc === "gzip")    stream = res.pipe(zlib.createGunzip());
-      if (enc === "deflate") stream = res.pipe(zlib.createInflate());
-      let body = "";
-      stream.on("data",  (c) => (body += c));
-      stream.on("end",   () => resolve(body));
-      stream.on("error", reject);
-    });
-    req.on("error",   reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Timeout")); });
-    req.end();
+      res.on("data", d => body += d);
+      res.on("end",  () => resolve(body));
+    }).on("error", reject);
   });
 }
 
-// ─── Core sync function ───────────────────────────────────────────────────────
-async function syncAll() {
-  const log = [`🔄 Sincronização iniciada: ${new Date().toLocaleString("pt-BR")}`];
-  let added = 0;
+function genId() { return Math.random().toString(36).slice(2, 10); }
 
-  for (const [source, rooms] of Object.entries(data.urls)) {
-    for (const [roomId, url] of Object.entries(rooms)) {
+// ─── Reservas ────────────────────────────────────────────────────────────────────
+app.get("/reservations", (req, res) => {
+  res.json(readData().reservations);
+});
+
+app.post("/reservations", (req, res) => {
+  const data = readData();
+  const r    = { ...req.body, id: req.body.id || genId(), createdAt: req.body.createdAt || new Date().toISOString() };
+  if (r.externalUid && data.reservations.find(x => x.externalUid === r.externalUid)) {
+    return res.json({ ok: false, reason: "duplicate" });
+  }
+  data.reservations.push(r);
+  writeData(data);
+  res.json({ ok: true, reservation: r });
+});
+
+app.put("/reservations/:id", (req, res) => {
+  const data = readData();
+  const idx  = data.reservations.findIndex(r => r.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "not found" });
+  data.reservations[idx] = { ...data.reservations[idx], ...req.body };
+  writeData(data);
+  res.json({ ok: true });
+});
+
+app.delete("/reservations/:id", (req, res) => {
+  const data = readData();
+  data.reservations = data.reservations.filter(r => r.id !== req.params.id);
+  writeData(data);
+  res.json({ ok: true });
+});
+
+// ─── URLs iCal ───────────────────────────────────────────────────────────────────
+app.get("/urls", (req, res) => {
+  const data = readData();
+  res.json(data.icalUrls || { booking: {}, airbnb: {} });
+});
+
+app.post("/urls", (req, res) => {
+  const data = readData();
+  data.icalUrls = req.body;
+  writeData(data);
+  res.json({ ok: true });
+});
+
+// ─── Sincronização iCal ───────────────────────────────────────────────────────────
+app.post("/sync", async (req, res) => {
+  const data = readData();
+  const log  = ["⏳ Iniciando sincronização..."];
+  let added  = 0;
+
+  for (const [source, urls] of Object.entries(data.icalUrls || {})) {
+    for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
-      log.push(`\n📌 ${source} – Quarto ${roomId}`);
+      log.push(`🔍 ${source} — Quarto ${roomId}`);
       try {
         const text = await fetchUrl(url);
         if (!text.includes("BEGIN:VCALENDAR")) {
-          log.push("   ⚠️ URL não retornou iCal válido");
+          log.push(`   ⚠️ Resposta inválida (não é iCal)`);
           continue;
         }
-        const events = parseIcal(text);
-        log.push(`   → ${events.length} evento(s) encontrado(s)`);
-
-        for (const ev of events) {
+        const evts = parseIcal(text);
+        log.push(`   → ${evts.length} evento(s)`);
+        for (const ev of evts) {
           const uid = `${source}-${roomId}-${ev.uid}`;
-          const exists = data.reservations.find((r) => r.externalUid === uid);
-          if (!exists) {
-            data.reservations.push({
-              id:          `srv-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-              roomId,
-              externalUid: uid,
-              status:      "confirmed",
-              guestName:   ev.summary,
-              checkIn:     ev.checkIn,
-              checkOut:    ev.checkOut,
-              source,
-              adults:      2,
-              children:    0,
-              phone:       "",
-              notes:       "Importado automaticamente via servidor",
-              createdAt:   new Date().toISOString(),
-            });
-            log.push(`   ✓ ${ev.summary} (${ev.checkIn} → ${ev.checkOut})`);
-            added++;
-          }
+          if (data.reservations.find(r => r.externalUid === uid)) continue;
+          data.reservations.push({
+            id: genId(), roomId, externalUid: uid, status: "confirmed",
+            guestName:  ev.summary || `${source} reserva`,
+            checkIn:    ev.checkIn, checkOut: ev.checkOut,
+            source, adults: 2, children: 0, phone: "",
+            notes: "Importado via iCal", createdAt: new Date().toISOString(),
+          });
+          log.push(`   ✓ ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
+          added++;
         }
-      } catch (e) {
+      } catch(e) {
         log.push(`   ✗ Erro: ${e.message}`);
       }
     }
   }
 
-  data.lastSync = new Date().toISOString();
-  data.syncLog  = log;
-  saveData();
-  console.log(`✅ Sync concluído — ${added} nova(s) reserva(s)`);
-  return { log, added };
-}
-
-// ─── Routes ───────────────────────────────────────────────────────────────────
-
-// Health check
-app.get("/", (req, res) => {
-  res.json({
-    status:    "online",
-    pms:       "Pousada PMS Server",
-    lastSync:  data.lastSync,
-    reservas:  data.reservations.filter(r => r.status !== "cancelled").length,
-  });
+  writeData(data);
+  log.push(`✅ Concluído — ${added} nova(s) reserva(s) importada(s)`);
+  res.json({ ok: true, log, added });
 });
 
-// GET all reservations
-app.get("/reservations", (req, res) => {
-  res.json(data.reservations);
-});
-
-// POST create/update reservation
-app.post("/reservations", (req, res) => {
-  const r = req.body;
-  if (!r.id) {
-    r.id = `m-${Date.now()}`;
-    r.createdAt = new Date().toISOString();
-    data.reservations.push(r);
-  } else {
-    const idx = data.reservations.findIndex(x => x.id === r.id);
-    if (idx >= 0) data.reservations[idx] = r;
-    else data.reservations.push(r);
-  }
-  saveData();
-  res.json({ ok: true, reservation: r });
-});
-
-// DELETE / cancel reservation
-app.delete("/reservations/:id", (req, res) => {
-  const idx = data.reservations.findIndex(x => x.id === req.params.id);
-  if (idx >= 0) {
-    data.reservations[idx].status = "cancelled";
-    saveData();
-    res.json({ ok: true });
-  } else {
-    res.status(404).json({ error: "Não encontrada" });
-  }
-});
-
-// GET iCal URLs
-app.get("/urls", (req, res) => {
-  res.json(data.urls);
-});
-
-// POST save iCal URLs
-app.post("/urls", (req, res) => {
-  data.urls = req.body;
-  saveData();
-  res.json({ ok: true });
-});
-
-// POST trigger manual sync
-app.post("/sync", async (req, res) => {
+// ─── Proxy iCal (teste pontual) ────────────────────────────────────────────────────
+app.get("/proxy-ical", async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send("Parâmetro 'url' obrigatório");
+  const allowed = ["airbnb.com", "booking.com", "ical.booking.com", "airbnb.com.br"];
+  if (!allowed.some(d => url.includes(d))) return res.status(403).send("Domínio não permitido");
   try {
-    const result = await syncAll();
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    const text = await fetchUrl(url);
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.send(text);
+  } catch(e) {
+    res.status(500).send("Erro: " + e.message);
   }
 });
 
-// GET last sync log
-app.get("/sync/log", (req, res) => {
-  res.json({ lastSync: data.lastSync, log: data.syncLog });
+// ─── Fallback SPA ─────────────────────────────────────────────────────────────────
+app.get("*", (req, res) => {
+  const idx = path.join(__dirname, "build", "index.html");
+  if (fs.existsSync(idx)) res.sendFile(idx);
+  else res.send("PMS Pousada — servidor OK 🏡");
 });
 
-// ─── Cron: sync every hour ────────────────────────────────────────────────────
-cron.schedule("0 * * * *", () => {
-  console.log("⏰ Sync automático (a cada hora)");
-  syncAll();
-});
-
-// ─── Start ────────────────────────────────────────────────────────────────────
-loadData();
-app.listen(PORT, () => {
-  console.log(`🏡 Pousada PMS Server rodando na porta ${PORT}`);
-  // Initial sync on startup
-  syncAll().catch(console.error);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ PMS Pousada rodando na porta ${PORT}`);
 });
