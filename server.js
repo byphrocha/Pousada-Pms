@@ -35,7 +35,7 @@ function parseIcal(text) {
   };
   for (let i = 1; i < blocks.length; i++) {
     const b   = blocks[i];
-    const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:([^\r\n]+")); return m ? m[1].trim() : ""; };
+    const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:(.+)")); return m ? m[1].trim() : ""; };
     const dtstart = get("DTSTART"), dtend = get("DTEND"), summary = get("SUMMARY"), uid = get("UID");
     if (dtstart && dtend) events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
   }
