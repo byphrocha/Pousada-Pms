@@ -67,24 +67,51 @@ function parseIcal(text) {
   return events;
 }
 
-// ─── HTTP fetch (no external deps) ───────────────────────────────────────────
-function fetchUrl(url) {
+
+// ─── HTTP fetch com headers de browser para evitar bloqueios ─────────────────
+const BROWSER_HEADERS = {
+  "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+  "Accept":          "text/calendar, text/plain, */*",
+  "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+  "Cache-Control":   "no-cache",
+  "Pragma":          "no-cache",
+  "Connection":      "keep-alive",
+};
+
+function fetchUrl(url, redirectCount = 0) {
+  if (redirectCount > 5) return Promise.reject(new Error("Muitos redirecionamentos"));
   return new Promise((resolve, reject) => {
-    const lib = url.startsWith("https") ? https : http;
-    const req = lib.get(url, { timeout: 15000 }, (res) => {
-      // Follow redirects
+    const lib    = url.startsWith("https") ? https : http;
+    const parsed = new URL(url);
+    const options = {
+      hostname: parsed.hostname,
+      path:     parsed.pathname + parsed.search,
+      method:   "GET",
+      headers:  Object.assign({}, BROWSER_HEADERS, { "Host": parsed.hostname }),
+      timeout:  20000,
+    };
+    const req = lib.request(options, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchUrl(res.headers.location).then(resolve).catch(reject);
+        const loc = res.headers.location;
+        const next = loc.startsWith("http") ? loc : parsed.protocol + "//" + parsed.hostname + loc;
+        return fetchUrl(next, redirectCount + 1).then(resolve).catch(reject);
       }
       if (res.statusCode !== 200) {
-        return reject(new Error(`HTTP ${res.statusCode}`));
+        return reject(new Error("HTTP " + res.statusCode));
       }
+      const zlib = require("zlib");
+      const enc  = res.headers["content-encoding"];
+      let stream = res;
+      if (enc === "gzip")    stream = res.pipe(zlib.createGunzip());
+      if (enc === "deflate") stream = res.pipe(zlib.createInflate());
       let body = "";
-      res.on("data", (chunk) => (body += chunk));
-      res.on("end", () => resolve(body));
+      stream.on("data",  (c) => (body += c));
+      stream.on("end",   () => resolve(body));
+      stream.on("error", reject);
     });
-    req.on("error", reject);
+    req.on("error",   reject);
     req.on("timeout", () => { req.destroy(); reject(new Error("Timeout")); });
+    req.end();
   });
 }
 
