@@ -1,1146 +1,253 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PMS · Pousada</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,700;1,300&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg0:#070b14;--bg1:#0d1221;--bg2:#131929;--bg3:#1b2234;
-  --bd:#1e2d45;--bdh:#2d4268;
-  --tx:#d9e4f5;--mu:#5a7090;--dm:#8898b4;
-  --gr:#22c55e;--grd:#0f2b1a;
-  --rd:#ef4444;--rdd:#2b0f0f;
-  --bl:#3b82f6;--bld:#0f1e2b;
-  --am:#f59e0b;--amd:#2b1e0a;
-  --lp:#a855f7;--lpd:#1e0f2b;
-  --bk:#0066cc;--ab:#ff5a5f;--di:#8b5cf6;
-}
-body{background:var(--bg0);color:var(--tx);font-family:'DM Mono',monospace;min-height:100vh;display:flex}
-button{font-family:'DM Mono',monospace;cursor:pointer}
-input,select,textarea{font-family:'DM Mono',monospace}
+const express = require("express");
+const https   = require("https");
+const http    = require("http");
+const fs      = require("fs");
+const path    = require("path");
+const { createClient } = require("@supabase/supabase-js");
 
-/* Layout */
-#sidebar{width:64px;background:var(--bg1);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:4px;flex-shrink:0}
-#sidebar .logo{font-size:24px;margin-bottom:16px}
-.nav-btn{width:48px;height:48px;border-radius:10px;border:none;background:transparent;font-size:20px;color:var(--tx);cursor:pointer;display:flex;align-items:center;justify-content:center;border-left:3px solid transparent;transition:all .15s}
-.nav-btn.active{background:var(--bg3);border-left-color:var(--bl)}
-#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-#topbar{background:var(--bg1);border-bottom:1px solid var(--bd);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-#topbar h1{font-family:'Fraunces',serif;font-size:18px;font-weight:700;color:var(--tx)}
-#topbar .sub{font-size:10px;color:var(--mu);margin-top:2px;letter-spacing:.04em}
-#content{flex:1;overflow-y:auto;padding:24px}
+const app  = express();
+const PORT = process.env.PORT || 3000;
 
-/* Cards */
-.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
-.kpi{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;text-align:center}
-.kpi .val{font-size:28px;font-weight:700;font-family:'Fraunces',serif;line-height:1}
-.kpi .lbl{font-size:9px;color:var(--mu);margin-top:4px;letter-spacing:.1em}
+// Supabase
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-/* Room grid */
-.room-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:12px}
-.room-card{border-radius:12px;padding:12px 8px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;transition:transform .18s,box-shadow .18s;user-select:none}
-.room-card:hover{transform:translateY(-3px)}
-.room-dot{position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%}
-.room-num{font-size:20px;font-weight:700;line-height:1}
-.room-icon{font-size:24px}
-.room-type{font-size:9px;text-align:center;line-height:1.3;font-weight:600;max-width:80px}
-.room-climate{font-size:9px;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:99px}
-.clean-btn{margin-top:4px;font-size:9px;padding:3px 8px;border-radius:6px;border:1px solid #a855f7;background:#1e0f2b;color:#a855f7;cursor:pointer;font-family:'DM Mono',monospace;font-weight:700;transition:background .15s}
-.clean-btn:hover{background:#2d1545}
+app.use(express.json());
 
-/* Legend */
-.legend{display:flex;gap:18px;margin-bottom:18px;flex-wrap:wrap}
-.legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mu)}
-.legend-dot{width:8px;height:8px;border-radius:50%}
+// CORS — antes de qualquer rota
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin",  "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
-/* Reservas list */
-.res-row{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:14px;margin-bottom:8px;transition:border-color .15s}
-.res-row:hover{border-color:var(--bdh)}
-.res-id{width:46px;height:46px;border-radius:10px;background:var(--bg0);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--bl);flex-shrink:0}
-.pill{font-size:10px;padding:2px 9px;border-radius:99px;font-weight:700;letter-spacing:.04em}
-
-/* Date group header */
-.date-group-header{display:flex;align-items:center;gap:12px;margin:20px 0 10px;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--mu);text-transform:uppercase}
-.date-group-header:first-child{margin-top:0}
-.date-group-line{flex:1;height:1px;background:var(--bd)}
-.date-group-badge{background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:3px 10px;white-space:nowrap;font-size:10px}
-
-/* Modal */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
-.modal{background:var(--bg1);border:1px solid var(--bd);border-radius:16px;padding:28px;width:100%;max-width:520px;max-height:92vh;overflow-y:auto}
-.modal h2{font-family:'Fraunces',serif;font-size:17px;margin-bottom:22px;display:flex;justify-content:space-between;align-items:center}
-.modal h2 button{background:none;border:none;color:var(--mu);font-size:24px;cursor:pointer;padding:0 4px}
-
-/* Form */
-.field{margin-bottom:12px}
-.field label{display:block;font-size:10px;color:var(--mu);margin-bottom:4px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-.field input,.field select,.field textarea{width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:9px 12px;font-size:13px;outline:none;font-family:'DM Mono',monospace}
-.field textarea{height:64px;resize:vertical}
-.row2{display:flex;gap:12px}
-.row2 .field{flex:1}
-
-/* Buttons */
-.btn{border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;border:1px solid var(--bd);color:#fff;font-family:'DM Mono',monospace;cursor:pointer;transition:opacity .15s}
-.btn-green{background:#166534;border-color:#166534}
-.btn-blue{background:#1e3a5f;border-color:var(--bl);color:var(--bl)}
-.btn-red{background:#4a1010;border-color:var(--rd)}
-.btn-purple{background:#2d1545;border-color:var(--lp);color:var(--lp)}
-.btn-dim{background:var(--bg3)}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-
-/* Filter bar */
-.filter-bar{display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap}
-.filter-bar input{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:8px 12px;font-size:13px;outline:none;width:220px;font-family:'DM Mono',monospace}
-.tab-btn{padding:8px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--mu);cursor:pointer;font-size:11px;font-weight:700;font-family:'DM Mono',monospace}
-.tab-btn.active{background:#1e3a5f;border-color:var(--bl);color:var(--bl)}
-
-/* Date filter */
-.date-filter{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
-.date-filter label{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
-.date-filter input[type=date]{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:7px 10px;font-size:12px;outline:none;font-family:'DM Mono',monospace}
-.date-filter .clear-btn{font-size:11px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--bg2);color:var(--mu);cursor:pointer;font-family:'DM Mono',monospace}
-
-/* Sync */
-.log-box{background:#04060d;border:1px solid var(--bd);border-radius:10px;padding:16px;font-family:'DM Mono',monospace;font-size:11px;color:#4ade80;max-height:200px;overflow-y:auto;line-height:1.8;margin-top:16px}
-.sync-info{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:20px;font-size:13px;color:var(--dm);line-height:1.7}
-
-/* Today agenda */
-.agenda{margin-top:28px;border-top:1px solid var(--bd);padding-top:22px}
-.agenda-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.agenda-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;margin-bottom:8px}
-.agenda-row{border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px}
-.agenda-room{font-weight:800;font-size:15px}
-
-/* Suite */
-.suite-wrapper{display:contents}
-.suite-group{grid-column:span 2;display:flex;flex-direction:column;gap:4px;
-  border:2px dashed #f59e0b55;border-radius:14px;padding:8px;position:relative;background:#2b1e0a22}
-.suite-label{font-size:9px;color:#f59e0b;font-weight:700;letter-spacing:.1em;text-align:center;
-  margin-bottom:2px;text-transform:uppercase}
-.suite-rooms{display:flex;gap:8px}
-.suite-rooms .room-card{flex:1}
-.suite-join-btn{font-size:10px;padding:5px 10px;border-radius:7px;border:1px solid #f59e0b;
-  background:#2b1e0a;color:#f59e0b;cursor:pointer;font-family:'DM Mono',monospace;
-  font-weight:700;text-align:center;margin-top:2px;transition:background .15s;width:100%}
-.suite-join-btn:hover{background:#3d2a0f}
-
-@media(max-width:640px){
-  /* Layout: sidebar vira bottom nav */
-  body{flex-direction:column}
-  #sidebar{
-    width:100%; height:58px; flex-direction:row;
-    border-right:none; border-top:1px solid var(--bd);
-    padding:0 8px; gap:0;
-    order:2; position:fixed; bottom:0; left:0; right:0; z-index:100;
-    justify-content:space-around;
-  }
-  #sidebar .logo{display:none}
-  .nav-btn{
-    border-left:none; border-top:3px solid transparent;
-    border-radius:8px; flex:1; height:48px;
-    flex-direction:column; font-size:18px; gap:2px;
-  }
-  .nav-btn.active{border-top-color:var(--bl);background:var(--bg3)}
-  #main{order:1; overflow:hidden; padding-bottom:58px}
-  #topbar{padding:10px 14px}
-  #topbar h1{font-size:15px}
-  #topbar .sub{display:none}
-  #topbar .btn{font-size:11px;padding:7px 12px}
-  #content{padding:14px}
-
-  /* KPIs: 3 por linha */
-  .kpi-grid{grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
-  .kpi .val{font-size:22px}
-  .kpi .lbl{font-size:8px}
-
-  /* Room grid: menor */
-  .room-grid{grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px}
-  .room-card{padding:10px 6px 8px}
-  .room-num{font-size:17px}
-  .room-icon{font-size:20px}
-
-  /* Suite */
-  .suite-group{grid-column:span 2}
-
-  /* Agenda */
-  .agenda-grid{grid-template-columns:1fr}
-  .agenda{margin-top:18px;padding-top:14px}
-
-  /* Reservas */
-  .filter-bar{gap:7px}
-  .filter-bar input{width:100%;order:-1}
-  .filter-bar>div{overflow-x:auto;-webkit-overflow-scrolling:touch;
-    display:flex;gap:6px;padding-bottom:2px;max-width:100%}
-  .filter-bar>div::-webkit-scrollbar{display:none}
-  .tab-btn{white-space:nowrap;font-size:10px;padding:7px 10px}
-  .filter-bar .btn{white-space:nowrap}
-
-  .date-filter{gap:6px}
-  .date-filter>div:last-child{margin-left:0;width:100%;justify-content:flex-end}
-
-  /* Res row compacto */
-  .res-row{padding:10px 12px;gap:10px}
-  .res-id{width:38px;height:38px;font-size:14px}
-
-  /* Modal: full screen no mobile */
-  .overlay{padding:0;align-items:flex-end}
-  .modal{border-radius:16px 16px 0 0;max-height:88vh;padding:20px 16px}
-
-  /* Legend scroll horizontal */
-  .legend{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
-  .legend::-webkit-scrollbar{display:none}
-}
-</style>
-</head>
-<body>
-
-<div id="sidebar">
-  <div class="logo">🏡</div>
-  <button class="nav-btn active" onclick="showView('map')" title="Mapa de Quartos">🏨</button>
-  <button class="nav-btn" onclick="showView('reservas')" title="Reservas">📋</button>
-  <button class="nav-btn" onclick="showView('sync')" title="Sincronizar iCal">🔄</button>
-</div>
-
-<div id="main">
-  <div id="topbar">
-    <div>
-      <h1 id="view-title">Mapa de Quartos</h1>
-      <div class="sub" id="today-label"></div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-green" onclick="openNewModal()">+ Nova Reserva</button>
-    </div>
-  </div>
-  <div id="content"></div>
-</div>
-
-<!-- Modal -->
-<div class="overlay" id="modal" style="display:none" onclick="closeModal()">
-  <div class="modal" onclick="event.stopPropagation()">
-    <h2 id="modal-title">Nova Reserva <button onclick="closeModal()">×</button></h2>
-    <div id="modal-body"></div>
-  </div>
-</div>
-
-<script>
-// ─── Config ───────────────────────────────────────────────────────────────────
-const ROOMS = [
-  {id:"10",type:"Triplo",climate:"AC",cap:3},
-  {id:"11",type:"Triplo",climate:"Ventilador",cap:3},
-  {id:"12",type:"Triplo",climate:"Ventilador",cap:3},
-  {id:"20",type:"Quádruplo",climate:"AC",cap:4},
-  {id:"21",type:"Triplo",climate:"AC",cap:3},
-  {id:"22",type:"Casal+1 Soltr",climate:"AC",cap:3},
-  {id:"23",type:"Casal+2 Soltr",climate:"AC",cap:4},
-  {id:"24",type:"Duplo",climate:"AC",cap:2},
-  {id:"25",type:"Casal+1 Soltr",climate:"AC",cap:3},
+// Utilitários iCal
+const AIRBNB_BLOCKED = [
+  /not available/i, /^blocked$/i, /unavailable/i,
+  /bloqueado/i, /indispon/i,
 ];
 
-// ─── Suítes (quartos combinados) ─────────────────────────────────────────────
-const SUITES = [
-  { id:"11+12", label:"Suíte 11+12", rooms:["11","12"], type:"Triplo ×2 (Ventilador)", cap:6 }
-];
-const todayStr  = () => new Date().toISOString().split("T")[0];
-const fmtDate   = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR") : "—";
-const fmtMonth  = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"}) : "";
-const genId     = () => Math.random().toString(36).slice(2,10);
-const nights    = (ci,co) => Math.max(0,Math.round((new Date(co)-new Date(ci))/86400000));
-const isSameDay = (a,b) => a===b;
-
-// ─── State ────────────────────────────────────────────────────────────────────
-let reservations = [];
-let currentView  = "map";
-let syncLog      = [];
-let icalUrls     = {booking:{},airbnb:{}};
-let filterTab    = "upcoming";
-let searchQ      = "";
-let dateFrom     = "";
-let dateTo       = "";
-let groupByDate  = true;          // agrupamento por data nas reservas
-let cleanedRooms = new Set();     // quartos marcados como limpos hoje
-
-// Chave para limpeza — reseta todo dia
-const CLEAN_KEY  = "cleaned_"+todayStr();
-try { cleanedRooms = new Set(JSON.parse(localStorage.getItem(CLEAN_KEY)||"[]")); } catch{}
-
-function saveClean() {
-  try { localStorage.setItem(CLEAN_KEY, JSON.stringify([...cleanedRooms])); } catch{}
-}
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-async function api(method, path, body) {
-  const opts = {method, headers:{"Content-Type":"application/json"}};
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(path, opts);
-  return r.json();
-}
-
-const BLOCKED_NAMES = [
-  /not available/i, /closed/i, /blocked/i,
-  /bloqueado/i, /indispon/i, /unavailable/i,
-];
-// Só filtra bloqueios do Airbnb — no Booking "Closed" pode ser reserva real
-const isAirbnbBlock = r => r.source === "airbnb" && BLOCKED_NAMES.some(p => p.test(r.guestName||""));
-
-async function loadAll() {
-  try {
-    const [res, urls] = await Promise.all([
-      api("GET","/reservations"),
-      api("GET","/urls")
-    ]);
-    reservations = Array.isArray(res)
-      ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
-      : [];
-    icalUrls = urls || {booking:{},airbnb:{}};
-  } catch(e) { console.error(e); }
-  render();
-}
-
-function normalizeRes(r) {
-  return {
-    id:          r.id,
-    roomId:      r.room_id    || r.roomId,
-    guestName:   r.guest_name || r.guestName,
-    checkIn:     r.check_in   || r.checkIn,
-    checkOut:    r.check_out  || r.checkOut,
-    source:      r.source     || "direto",
-    adults:      r.adults     || 2,
-    children:    r.children   || 0,
-    phone:       r.phone      || "",
-    notes:       r.notes      || "",
-    status:      r.status     || "confirmed",
-    externalUid: r.external_uid || r.externalUid || null,
-    createdAt:   r.created_at   || r.createdAt   || new Date().toISOString(),
-  };
-}
-
-async function saveReservation(form) {
-  if (form.id && reservations.find(r=>r.id===form.id)) {
-    await api("PUT",`/reservations/${form.id}`, form);
-  } else {
-    const res = await api("POST","/reservations", {...form, id:genId()});
-    if (res.reservation) reservations.push(normalizeRes(res.reservation));
-  }
-  await loadAll();
-}
-
-async function cancelReservation(id) {
-  await api("PUT",`/reservations/${id}`, {status:"cancelled"});
-  await loadAll();
-  closeModal();
-}
-
-// ─── Room helpers ─────────────────────────────────────────────────────────────
-function getRoomStatus(roomId) {
-  const t = todayStr();
-  // Se marcado como limpo hoje → livre
-  if (cleanedRooms.has(roomId)) return "free";
-  for (const r of reservations) {
-    if (r.roomId!==roomId || r.status==="cancelled") continue;
-    if (r.checkIn===t)             return "checkin";
-    if (r.checkOut===t)            return "cleaning"; // check-out hoje = aguardando limpeza
-    if (r.checkIn<t&&r.checkOut>t) return "occupied";
-  }
-  return "free";
-}
-
-function getRoomRes(roomId) {
-  const t = todayStr();
-  return reservations.find(r=>
-    r.roomId===roomId && r.status!=="cancelled" && r.checkIn<=t && r.checkOut>t
-  );
-}
-
-function markClean(roomId, event) {
-  event.stopPropagation();
-  cleanedRooms.add(roomId);
-  saveClean();
-  render();
-}
-
-const STATUS = {
-  free:    {label:"Livre",    color:"#22c55e", bg:"#0f2b1a", icon:"🚪"},
-  occupied:{label:"Ocupado",  color:"#ef4444", bg:"#2b0f0f", icon:"🔒"},
-  checkin: {label:"Check-in", color:"#3b82f6", bg:"#0f1e2b", icon:"🔓"},
-  checkout:{label:"Check-out",color:"#f59e0b", bg:"#2b1e0a", icon:"🧹"},
-  cleaning:{label:"Limpeza",  color:"#a855f7", bg:"#1e0f2b", icon:"🧹"},
-};
-const SRC_COLOR = {direto:"#8b5cf6",booking:"#0066cc",airbnb:"#ff5a5f"};
-
-// ─── Render engine ────────────────────────────────────────────────────────────
-function render() {
-  const titles = {map:"Mapa de Quartos", reservas:"Reservas", sync:"Sincronizar iCal"};
-  document.getElementById("view-title").textContent  = titles[currentView];
-  document.getElementById("today-label").textContent =
-    new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  document.querySelectorAll(".nav-btn").forEach((b,i)=>{
-    b.classList.toggle("active", ["map","reservas","sync"][i]===currentView);
-  });
-  const c = document.getElementById("content");
-  if (currentView==="map")      c.innerHTML = renderMap();
-  if (currentView==="reservas") c.innerHTML = renderReservas();
-  if (currentView==="sync")     c.innerHTML = renderSync();
-}
-
-function showView(v) { currentView=v; render(); }
-
-// ─── MAP VIEW ─────────────────────────────────────────────────────────────────
-function getCasaFechadaToday() {
-  const t = todayStr();
-  // reserva de casa fechada ativa hoje (qualquer quarto com nota [Casa toda:])
-  return reservations.find(r =>
-    r.status !== "cancelled" &&
-    r.notes && r.notes.includes("[Casa toda:") &&
-    r.checkIn <= t && r.checkOut > t
-  ) || null;
-}
-function getCasaFechadaCheckin() {
-  const t = todayStr();
-  return reservations.find(r =>
-    r.status !== "cancelled" &&
-    r.notes && r.notes.includes("[Casa toda:") &&
-    r.checkIn === t
-  ) || null;
-}
-function getCasaFechadaCheckout() {
-  const t = todayStr();
-  return reservations.find(r =>
-    r.status !== "cancelled" &&
-    r.notes && r.notes.includes("[Casa toda:") &&
-    r.checkOut === t
-  ) || null;
-}
-
-function renderMap() {
-  const t        = todayStr();
-  const cfAtiva    = getCasaFechadaToday();
-  const cfCheckin  = getCasaFechadaCheckin();
-  const cfCheckout = getCasaFechadaCheckout();
-
-  // Se há Casa Fechada, todos os quartos são contados como ocupados
-  const occupied = cfAtiva
-    ? ROOMS.map(r => ({roomId: r.id}))  // virtual: todos ocupados
-    : reservations.filter(r=>r.status!=="cancelled"&&r.checkIn<=t&&r.checkOut>t);
-
-  // Check-ins e check-outs: se CF, mostra 1 (a pousada toda)
-  const checkins  = cfCheckin  ? [{roomId:"CF"}]
-    : reservations.filter(r=>r.checkIn===t&&r.status!=="cancelled"&&!(r.notes&&r.notes.includes("[Casa toda:")));
-  const checkouts = cfCheckout ? [{roomId:"CF"}]
-    : reservations.filter(r=>r.checkOut===t&&r.status!=="cancelled"&&!(r.notes&&r.notes.includes("[Casa toda:")));
-  const cleaning  = cfAtiva ? [] : ROOMS.filter(r=>getRoomStatus(r.id)==="cleaning");
-
-  // KPIs
-  let html = `<div class="kpi-grid">`;
-  [
-    [cfAtiva ? ROOMS.length : occupied.length, "#ef4444","Ocupados"],
-    [checkins.length,  "#3b82f6","Check-ins"],
-    [checkouts.length, "#f59e0b","Check-outs"],
-    [cfAtiva ? 0 : cleaning.length, "#a855f7","Em Limpeza"],
-    [cfAtiva ? 0 : ROOMS.length - occupied.length - cleaning.length, "#22c55e","Disponíveis"],
-  ].forEach(([v,c,l])=>{
-    html+=`<div class="kpi"><div class="val" style="color:${c}">${v}</div><div class="lbl">${l}</div></div>`;
-  });
-  html+=`</div>`;
-
-  // Banner Casa Fechada
-  if (cfAtiva) {
-    html+=`<div style="background:#0f1e2b;border:1px solid #3b82f644;border-radius:10px;padding:12px 18px;
-      margin-bottom:16px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:24px">🏡</span>
-      <div>
-        <div style="font-size:13px;font-weight:700;color:#3b82f6">Casa Fechada</div>
-        <div style="font-size:11px;color:var(--mu);margin-top:2px">
-          ${cfAtiva.guestName} · ${fmtDate(cfAtiva.checkIn)} → ${fmtDate(cfAtiva.checkOut)}
-        </div>
-      </div>
-      <span class="pill" style="background:#3b82f622;color:#3b82f6;margin-left:auto">CF</span>
-    </div>`;
-  }
-
-  // Legend
-  html+=`<div class="legend">`;
-  Object.entries(STATUS).forEach(([k,v])=>{
-    html+=`<div class="legend-item"><div class="legend-dot" style="background:${v.color};box-shadow:0 0 5px ${v.color}"></div>${v.label}</div>`;
-  });
-  html+=`</div>`;
-
-  // Room grid — quartos 11 e 12 aparecem agrupados como suíte
-  html+=`<div class="room-grid">`;
-  ROOMS.forEach(room=>{
-    // Quarto 11 → abre o bloco da suíte
-    if (room.id==="11") {
-      const st11 = cfAtiva ? "occupied" : getRoomStatus("11");
-      const st12 = cfAtiva ? "occupied" : getRoomStatus("12");
-      const s11  = STATUS[st11], s12 = STATUS[st12];
-      const res11= cfAtiva ? cfAtiva : getRoomRes("11");
-      const res12= cfAtiva ? cfAtiva : getRoomRes("12");
-      const suiteOccupied = ["11","12"].every(id=>["occupied","checkin"].includes(getRoomStatus(id)));
-      const bothFree      = ["11","12"].every(id=>getRoomStatus(id)==="free");
-
-      const roomCard = (room, st, s, res) => {
-        const showClean = st==="cleaning";
-        return `<div class="room-card" style="background:${s.bg};border:1.5px solid ${s.color}44"
-          onclick="handleRoomClick('${room.id}')"
-          onmouseenter="this.style.boxShadow='0 8px 24px ${s.color}22'"
-          onmouseleave="this.style.boxShadow='none'">
-          <div class="room-dot" style="background:${s.color};box-shadow:0 0 6px ${s.color}"></div>
-          <div class="room-num" style="color:${s.color}">${room.id}</div>
-          <div class="room-icon">${s.icon}</div>
-          <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
-          <div class="room-climate" style="color:${s.color}">💨 Vent.</div>
-          ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
-          ${showClean?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
-        </div>`;
-      };
-
-      html+=`<div class="suite-group">
-        <div class="suite-label">🔗 Suíte combinada</div>
-        <div class="suite-rooms">
-          ${roomCard(ROOMS.find(r=>r.id==="11"), st11, s11, res11)}
-          ${roomCard(ROOMS.find(r=>r.id==="12"), st12, s12, res12)}
-        </div>
-        ${bothFree
-          ? `<button class="suite-join-btn" onclick="openSuiteModal()">+ Reservar Suíte 11+12 juntos</button>`
-          : suiteOccupied
-            ? `<div style="font-size:9px;color:#f59e0b;text-align:center;padding:3px 0;opacity:.7">Suíte ocupada em conjunto</div>`
-            : ""}
-      </div>`;
-      return; // pula o render individual do 11
-    }
-    if (room.id==="12") return; // já renderizado dentro da suíte
-
-    // Casa Fechada: todos os quartos ocupados
-    const st  = cfAtiva ? "occupied" : getRoomStatus(room.id);
-    const s   = STATUS[st];
-    const res = cfAtiva ? cfAtiva : getRoomRes(room.id);
-    const showCleanBtn = !cfAtiva && st==="cleaning";
-    html+=`<div class="room-card" style="background:${s.bg};border:1.5px solid ${s.color}44"
-      onclick="handleRoomClick('${room.id}')"
-      onmouseenter="this.style.boxShadow='0 8px 24px ${s.color}22'"
-      onmouseleave="this.style.boxShadow='none'">
-      <div class="room-dot" style="background:${s.color};box-shadow:0 0 6px ${s.color}"></div>
-      <div class="room-num" style="color:${s.color}">${room.id}</div>
-      <div class="room-icon">${s.icon}</div>
-      <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
-      <div class="room-climate" style="color:${s.color}">${room.climate==="AC"?"❄ AC":"💨 Vent."}</div>
-      ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
-      ${showCleanBtn?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
-    </div>`;
-  });
-  html+=`</div>`;
-
-  // Hoje agenda
-  if (checkins.length||checkouts.length) {
-    html+=`<div class="agenda"><div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:14px">AGENDA HOJE</div>
-    <div class="agenda-grid">`;
-    [["CHECK-INS",checkins,"#3b82f6","#0f1e2b"],["CHECK-OUTS",checkouts,"#f59e0b","#2b1e0a"]].forEach(([lbl,list,clr,bg])=>{
-      html+=`<div><div class="agenda-lbl" style="color:${clr}">${lbl}</div>`;
-      if (!list.length) { html+=`<div style="color:var(--bd);font-size:13px">Nenhum hoje</div>`; }
-      list.forEach(r=>{
-        html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="handleRoomClick('${r.roomId}')">
-          <span class="agenda-room" style="color:${clr}">${r.roomId}</span>
-          <div>
-            <div style="color:var(--tx);font-size:13px;font-weight:600">${r.guestName}</div>
-            <div style="color:var(--mu);font-size:10px">${r.adults}ad${r.children>0?` + ${r.children}cr`:""}</div>
-          </div>
-        </div>`;
-      });
-      html+=`</div>`;
-    });
-    html+=`</div></div>`;
-  }
-  return html;
-}
-
-// ─── RESERVAS VIEW ────────────────────────────────────────────────────────────
-function renderReservas() {
-  const t = todayStr();
-
-  let list = reservations.filter(r=>{
-    if (filterTab==="upcoming")  return r.checkIn>=t   && r.status!=="cancelled";
-    if (filterTab==="active")    return r.checkIn<=t   && r.checkOut>t && r.status!=="cancelled";
-    if (filterTab==="past")      return r.checkOut<t   && r.status!=="cancelled";
-    if (filterTab==="checkins")  return r.checkIn===t  && r.status!=="cancelled";
-    if (filterTab==="checkouts") return r.checkOut===t && r.status!=="cancelled";
-    return true;
-  })
-  .filter(r=>!searchQ || r.guestName.toLowerCase().includes(searchQ.toLowerCase()) || r.roomId.includes(searchQ))
-  .filter(r=>{
-    if (dateFrom && r.checkIn < dateFrom) return false;
-    if (dateTo   && r.checkIn > dateTo)   return false;
-    return true;
-  })
-  .sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
-
-  // Agrupa suíte 11+12 em uma linha só
-  list = groupSuiteReservations(list);
-  // Deduplica Casa Fechada → 1 linha CF
-  list = groupCasaFechada(list);
-
-  const todayCheckins  = reservations.filter(r=>r.checkIn===t  && r.status!=="cancelled").length;
-  const todayCheckouts = reservations.filter(r=>r.checkOut===t && r.status!=="cancelled").length;
-
-  let html=`
-  <div class="filter-bar">
-    <input id="search-inp" placeholder="🔍 Buscar hóspede ou quarto..." value="${searchQ}"
-      oninput="searchQ=this.value;render()">
-    <div style="display:flex;gap:6px;flex-wrap:wrap">`;
-
-  [
-    ["upcoming","Futuras"],
-    ["active","Ativas"],
-    ["checkins",  `✈ Check-ins${todayCheckins   ? ` <span style="background:#3b82f633;color:#3b82f6;border-radius:99px;padding:1px 6px;font-size:9px">${todayCheckins}</span>`   :""}`],
-    ["checkouts", `🧹 Check-outs${todayCheckouts ? ` <span style="background:#f59e0b33;color:#f59e0b;border-radius:99px;padding:1px 6px;font-size:9px">${todayCheckouts}</span>` :""}`],
-    ["past","Passadas"],
-    ["all","Todas"],
-  ].forEach(([v,l])=>{
-    html+=`<button class="tab-btn${filterTab===v?" active":""}" onclick="filterTab='${v}';render()">${l}</button>`;
-  });
-
-  html+=`</div>
-    <div style="display:flex;gap:8px;margin-left:auto">
-      <button class="btn btn-green" onclick="openNewModal()">+ Nova Reserva</button>
-      <button class="btn" style="background:#1e3a5f;border-color:#3b82f6;color:#3b82f6" onclick="openCasaTodaModal()">🏡 Casa Toda</button>
-    </div>
-  </div>
-
-  <div class="date-filter">
-    <label>De</label>
-    <input type="date" value="${dateFrom}" onchange="dateFrom=this.value;render()">
-    <label>Até</label>
-    <input type="date" value="${dateTo}"   onchange="dateTo=this.value;render()">
-    ${dateFrom||dateTo?`<button class="clear-btn" onclick="dateFrom='';dateTo='';render()">✕ Limpar datas</button>`:""}
-    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-      <span style="font-size:10px;color:var(--mu)">Agrupar por mês</span>
-      <div onclick="groupByDate=!groupByDate;render()" style="width:36px;height:20px;border-radius:10px;cursor:pointer;position:relative;
-        background:${groupByDate?"#166534":"var(--bg3)"};border:1px solid ${groupByDate?"#166534":"var(--bd)"};transition:background .2s">
-        <div style="position:absolute;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;
-          transition:left .2s;left:${groupByDate?"18px":"2px"}"></div>
-      </div>
-    </div>
-  </div>
-
-  ${filterTab==="checkins"  ? `<div style="background:#0f1e2b;border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#3b82f6">
-    ✈ Check-ins de hoje — ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}
-    ${todayCheckins===0?"· <b>Nenhum check-in hoje</b>":""}</div>` : ""}
-  ${filterTab==="checkouts" ? `<div style="background:#2b1e0a;border:1px solid #f59e0b44;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#f59e0b">
-    🧹 Check-outs de hoje — ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}
-    ${todayCheckouts===0?"· <b>Nenhum check-out hoje</b>":""}</div>` : ""}
-  `;
-
-  if (!list.length) {
-    html+=`<div style="text-align:center;color:var(--bd);padding:48px;font-size:15px">Nenhuma reserva encontrada</div>`;
-    return html;
-  }
-
-  if (groupByDate) {
-    const groups = {};
-    list.forEach(r=>{
-      const key = r.checkIn.slice(0,7);
-      if (!groups[key]) groups[key]=[];
-      groups[key].push(r);
-    });
-    Object.entries(groups).sort(([a],[b])=>a.localeCompare(b)).forEach(([key,rows])=>{
-      const label = new Date(key+"-01T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
-      html+=`<div class="date-group-header">
-        <div class="date-group-badge">${label.charAt(0).toUpperCase()+label.slice(1)} · ${rows.length} reserva${rows.length!==1?"s":""}</div>
-        <div class="date-group-line"></div>
-      </div>`;
-      rows.forEach(r=>{ html+=resRow(r); });
-    });
-  } else {
-    list.forEach(r=>{ html+=resRow(r); });
-  }
-  return html;
-}
-
-function isSuiteRes(r) {
-  if (r.roomId!=="11" && r.roomId!=="12") return false;
-  // 1) marcado explicitamente nas notas
-  if (r.notes && (r.notes.includes("[Suíte grupo:") || r.notes.includes("Suíte 11+12"))) return true;
+function isAirbnbBlock(summary, uid) {
+  if (AIRBNB_BLOCKED.some(p => p.test(summary||""))) return true;
+  if (/CLOSED|BLOCK/i.test(uid||"") && !summary) return true;
   return false;
 }
 
-// Deduplica reservas de Casa Fechada — mostra 1 linha com "CF"
-function groupCasaFechada(list) {
-  const seen = new Set();
-  return list.reduce((acc, r) => {
-    if (r.notes && r.notes.includes("[Casa toda:")) {
-      const m = r.notes.match(/\[Casa toda:([^\]]+)\]/);
-      const key = m ? m[1] : `cf-${r.checkIn}-${r.checkOut}`;
-      if (seen.has(key)) return acc;
-      seen.add(key);
-      acc.push({ ...r, roomId: "CF", _isCFRow: true });
-    } else {
-      acc.push(r);
-    }
-    return acc;
-  }, []);
-}
-
-// Retorna chave de agrupamento para um quarto 11 ou 12
-function suiteKey(r) {
-  // prioridade: ID de grupo explícito nas notas
-  const m = (r.notes||"").match(/\[Suíte grupo:([^\]]+)\]/);
-  if (m) return "grp-" + m[1];
-  // fallback: mesmo hóspede + mesmas datas (cobre importações iCal)
-  return `pair-${r.guestName}-${r.checkIn}-${r.checkOut}`;
-}
-
-// Agrupa reservas de suíte para exibir como uma linha só
-function groupSuiteReservations(list) {
-  const grouped = [];
-  const seen = new Set();
-
-  list.forEach(r=>{
-    if (r.roomId!=="11" && r.roomId!=="12") {
-      grouped.push(r); return;
-    }
-    // Se é Casa Fechada, não agrupa como suíte — já será deduplicado abaixo
-    if (r.notes && r.notes.includes("[Casa toda:")) {
-      grouped.push(r); return;
-    }
-    // Quarto 11 ou 12 — verifica se existe par no mesmo período
-    const hasPair = list.some(o =>
-      o.id !== r.id &&
-      ((r.roomId==="11" && o.roomId==="12") || (r.roomId==="12" && o.roomId==="11")) &&
-      o.checkIn === r.checkIn && o.checkOut === r.checkOut &&
-      o.status === r.status
-    );
-
-    if (hasPair) {
-      // Agrupa como suíte — mostra apenas uma linha
-      const key = suiteKey(r) || `pair-${r.guestName}-${r.checkIn}-${r.checkOut}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      grouped.push({ ...r, roomId:"11+12", _isSuiteRow:true });
-    } else {
-      // Quarto 11 ou 12 reservado individualmente — mostra normal
-      grouped.push(r);
-    }
-  });
-  return grouped;
-}
-
-function resRow(r) {
-  const isCasaToda = r._isCFRow || (r.notes && r.notes.includes("[Casa toda:"));
-  const isSuite  = !isCasaToda && (r._isSuiteRow || isSuiteRes(r));
-  const roomLabel= isCasaToda ? "CF" : isSuite ? "11+12" : r.roomId;
-  const room     = isCasaToda ? {type:"Casa Fechada — pousada toda"}
-                 : isSuite    ? {type:"Suíte (Triplo ×2, Ventilador)"}
-                 : ROOMS.find(rm=>rm.id===r.roomId);
-  const n        = nights(r.checkIn, r.checkOut);
-  const srcClr   = SRC_COLOR[r.source]||"var(--mu)";
-  const cancelled= r.status==="cancelled";
-  return `<div class="res-row" style="opacity:${cancelled?.45:1}" onclick="openEditModal('${r.id}')">
-    <div class="res-id" style="${isCasaToda?"border:1px solid #3b82f655;color:#3b82f6;font-size:13px;background:#0f1e2b":isSuite?"border:1px solid #f59e0b55;color:#f59e0b;font-size:13px":""}">${roomLabel}</div>
-    <div style="flex:1;min-width:0">
-      <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px">
-        ${r.guestName}
-        ${isCasaToda?`<span class="pill" style="background:#3b82f622;color:#3b82f6">🏡 CF</span>`:""}
-        ${isSuite?`<span class="pill" style="background:#f59e0b22;color:#f59e0b">🔗 suíte</span>`:""}
-      </div>
-      <div style="font-size:11px;color:var(--mu);margin-top:3px">
-        ${room?.type||""} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}
-        · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>
-        ${r.phone?` · ${r.phone}`:""}
-      </div>
-    </div>
-    <div style="display:flex;gap:7px;align-items:center;flex-shrink:0">
-      <span class="pill" style="background:${srcClr}28;color:${srcClr}">${r.source}</span>
-      ${cancelled?`<span class="pill" style="background:#ef444428;color:#ef4444">cancelado</span>`:""}
-      <span style="color:var(--bd);font-size:20px">›</span>
-    </div>
-  </div>`;
-}
-
-// ─── SYNC VIEW ────────────────────────────────────────────────────────────────
-function renderSync() {
-  let html=`<div class="sync-info">
-    <b style="color:var(--tx)">Como usar:</b> Cole o link iCal do
-    <b style="color:#0066cc">Booking.com</b> e do <b style="color:#ff5a5f">Airbnb</b> para cada quarto.
-    O servidor busca as reservas e evita overbooking.<br><br>
-    <b style="color:var(--tx)">Booking:</b> Extranet → Propriedade → Calendário → Exportar iCal<br>
-    <b style="color:var(--tx)">Airbnb:</b> Calendário → Exportar → Copiar link
-  </div>`;
-
-  // iCal pousada toda (Airbnb)
-  const cfUrl = (icalUrls["airbnb"]||{})["CF"]||"";
-  html+=`<div style="margin-bottom:22px;background:#0f1e2b;border:1px solid #3b82f644;border-radius:12px;padding:14px">
-    <div style="font-size:12px;color:#3b82f6;font-weight:700;letter-spacing:.08em;margin-bottom:10px">
-      🏡 POUSADA TODA — Casa Fechada (Airbnb)
-    </div>
-    <div style="display:flex;gap:10px;align-items:center">
-      <div style="width:42px;color:#3b82f6;font-weight:800;font-size:12px;text-align:center;
-        background:#0f1e2b;border-radius:6px;padding:4px 2px;border:1px solid #3b82f644">CF</div>
-      <input style="flex:1;background:var(--bg0);border:1px solid ${cfUrl?"#3b82f655":"var(--bd)"};border-radius:8px;
-        color:${cfUrl?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
-        value="${cfUrl}" placeholder="URL iCal do anúncio da pousada toda (Airbnb)"
-        oninput="setIcalUrl('airbnb','CF',this.value)">
-    </div>
-    <div style="font-size:10px;color:var(--mu);margin-top:6px;padding-left:52px">
-      Importa como Casa Fechada — bloqueia todos os ${ROOMS.length} quartos automaticamente.
-    </div>
-  </div>`;
-
-  [["booking","🔵 Booking.com","#0066cc"],["airbnb","🔴 Airbnb","#ff5a5f"]].forEach(([src,label,clr])=>{
-    html+=`<div style="margin-bottom:22px">
-      <div style="font-size:12px;color:${clr};font-weight:700;letter-spacing:.08em;margin-bottom:12px">${label}</div>`;
-
-    // Airbnb: suíte 11+12 tem um único link — mostra campo combinado em vez de dois separados
-    const roomsToShow = src==="airbnb"
-      ? ROOMS.filter(r=>r.id!=="11"&&r.id!=="12")
-      : ROOMS;
-
-    if (src==="airbnb") {
-      const val = (icalUrls["airbnb"]||{})["11+12"]||"";
-      html+=`<div style="margin-bottom:10px">
-        <div style="font-size:10px;color:#f59e0b;font-weight:700;letter-spacing:.06em;margin-bottom:6px">
-          🔗 SUÍTE 11+12 (anúncio combinado)
-        </div>
-        <div style="display:flex;gap:10px;align-items:center">
-          <div style="width:42px;color:#f59e0b;font-weight:800;font-size:12px;text-align:center;
-            background:#2b1e0a;border-radius:6px;padding:4px 2px;border:1px solid #f59e0b44">11+12</div>
-          <input style="flex:1;background:var(--bg0);border:1px solid ${val?"#f59e0b55":"var(--bd)"};border-radius:8px;
-            color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
-            value="${val}" placeholder="URL iCal única do anúncio Suíte 11+12 no Airbnb"
-            oninput="setIcalUrl('airbnb','11+12',this.value)">
-        </div>
-        <div style="font-size:10px;color:var(--mu);margin-top:4px;padding-left:52px">
-          Esta URL criará reservas automaticamente nos quartos 11 e 12 simultaneamente.
-        </div>
-      </div>
-      <div style="border-top:1px solid var(--bd);margin:12px 0 10px"></div>
-      <div style="font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.06em;margin-bottom:8px">QUARTOS INDIVIDUAIS</div>`;
-    }
-
-    roomsToShow.forEach(r=>{
-      const val = (icalUrls[src]||{})[r.id]||"";
-      html+=`<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
-        <div style="width:32px;color:var(--bl);font-weight:800;font-size:14px;text-align:center">${r.id}</div>
-        <input style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
-          color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
-          value="${val}" placeholder="URL iCal — Qto ${r.id} (${r.type})"
-          oninput="setIcalUrl('${src}','${r.id}',this.value)">
-      </div>`;
-    });
-    html+=`</div>`;
-  });
-
-  html+=`<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-    <button class="btn btn-green" onclick="saveUrls()">💾 Salvar URLs</button>
-    <button class="btn btn-blue" id="sync-btn" onclick="doSync()">🔄 Sincronizar Agora</button>
-    <button class="btn btn-red" id="clean-btn" onclick="doCleanup()" title="Remove registros 'Not available', 'Closed', 'Blocked' etc do banco">🗑 Limpar Bloqueios</button>
-  </div>`;
-
-  if (syncLog.length) {
-    html+=`<div class="log-box" id="log-box">${syncLog.map(l=>`<div>${l}</div>`).join("")}</div>`;
-  }
-  return html;
-}
-
-function setIcalUrl(src, roomId, val) {
-  if (!icalUrls[src]) icalUrls[src]={};
-  icalUrls[src][roomId]=val;
-}
-
-async function saveUrls() {
-  await api("POST","/urls", icalUrls);
-  alert("URLs salvas com sucesso!");
-}
-
-async function doCleanup() {
-  const btn = document.getElementById("clean-btn");
-  if (btn) btn.disabled = true;
-  syncLog = ["🗑 Removendo bloqueios do banco..."];
-  render();
-  try {
-    const data = await api("POST", "/cleanup-blocked");
-    if (data.ok) {
-      syncLog = [`✅ ${data.deleted} registro(s) de bloqueio removido(s) do banco.`];
-    } else {
-      syncLog = ["✗ Erro: " + (data.error||"desconhecido")];
-    }
-  } catch(e) {
-    syncLog = ["✗ Erro: " + e.message];
-  }
-  if (btn) btn.disabled = false;
-  render();
-  await loadAll();
-}
-
-async function doSync() {
-  const btn = document.getElementById("sync-btn");
-  if (btn) btn.disabled=true;
-  syncLog=["⏳ Sincronizando..."];
-  render();
-  try {
-    const data = await api("POST","/sync");
-    syncLog = data.log || ["✅ Concluído"];
-  } catch(e) {
-    syncLog=["✗ Erro: "+e.message];
-  }
-  if (btn) btn.disabled=false;
-  render();
-  await loadAll();
-  const lb = document.getElementById("log-box");
-  if (lb) lb.scrollTop=lb.scrollHeight;
-}
-
-// ─── Modals ───────────────────────────────────────────────────────────────────
-function handleRoomClick(roomId) {
-  const st = getRoomStatus(roomId);
-  if (st==="cleaning") {
-    openCleaningModal(roomId); return;
-  }
-  const res = getRoomRes(roomId);
-  if (res) openEditModal(res.id);
-  else     openNewModal(roomId);
-}
-
-function openCleaningModal(roomId) {
-  const room = ROOMS.find(r=>r.id===roomId);
-  document.getElementById("modal-title").innerHTML =
-    `🧹 Quarto ${roomId} — Limpeza <button onclick="closeModal()">×</button>`;
-  document.getElementById("modal-body").innerHTML = `
-    <div style="text-align:center;padding:16px 0">
-      <div style="font-size:48px;margin-bottom:16px">🧹</div>
-      <div style="font-size:15px;color:var(--tx);margin-bottom:8px;font-weight:700">
-        Quarto ${roomId} — ${room?.type}
-      </div>
-      <div style="font-size:13px;color:var(--mu);margin-bottom:28px">
-        Check-out realizado hoje. Quarto aguardando limpeza.
-      </div>
-      <button class="btn btn-purple" style="width:100%;font-size:15px;padding:14px"
-        onclick="markCleanFromModal('${roomId}')">
-        ✓ Confirmar Limpeza — Liberar Quarto
-      </button>
-    </div>`;
-  document.getElementById("modal").style.display="flex";
-}
-
-function markCleanFromModal(roomId) {
-  cleanedRooms.add(roomId);
-  saveClean();
-  closeModal();
-  render();
-}
-
-function openNewModal(roomId) {
-  document.getElementById("modal-title").innerHTML =
-    `Nova Reserva <button onclick="closeModal()">×</button>`;
-  document.getElementById("modal-body").innerHTML = reservationForm({
-    roomId: roomId||ROOMS[0].id, guestName:"", checkIn:todayStr(), checkOut:"",
-    source:"direto", adults:2, children:0, phone:"", notes:""
-  }, false);
-  document.getElementById("modal").style.display="flex";
-}
-
-function openEditModal(id) {
-  const r = reservations.find(x=>x.id===id);
-  if (!r) return;
-  document.getElementById("modal-title").innerHTML =
-    `Editar Reserva <button onclick="closeModal()">×</button>`;
-  document.getElementById("modal-body").innerHTML = reservationForm(r, true);
-  document.getElementById("modal").style.display="flex";
-}
-
-function closeModal() {
-  document.getElementById("modal").style.display="none";
-}
-
-function reservationForm(r, isEdit) {
-  const isCF = r.roomId==="CF";
-  const roomOpts = [
-    `<option value="CF" ${isCF?"selected":""}>🏡 Casa Fechada — pousada toda</option>`,
-    `<option disabled>──────────────</option>`,
-    ...SUITES.map(s=>`<option value="${s.id}" ${s.id===r.roomId?"selected":""}>${s.id} – ${s.label} (até ${s.cap} pessoas)</option>`),
-    ...ROOMS.map(rm=>`<option value="${rm.id}" ${rm.id===r.roomId?"selected":""}>${rm.id} – ${rm.type}</option>`)
-  ].join("");
-  const n = r.checkIn&&r.checkOut ? nights(r.checkIn,r.checkOut) : 0;
-  return `
-  <div class="row2">
-    <div class="field"><label>Quarto</label>
-      <select id="f-roomId"><option value="">—</option>${roomOpts}</select></div>
-    <div class="field"><label>Canal</label>
-      <select id="f-source">
-        <option value="direto"   ${r.source==="direto"  ?"selected":""}>Direto</option>
-        <option value="booking"  ${r.source==="booking" ?"selected":""}>Booking.com</option>
-        <option value="airbnb"   ${r.source==="airbnb"  ?"selected":""}>Airbnb</option>
-      </select></div>
-  </div>
-  <div class="field"><label>Nome do Hóspede</label>
-    <input id="f-guestName" value="${r.guestName||""}" placeholder="Nome completo" autofocus></div>
-  <div class="row2">
-    <div class="field"><label>Check-in</label>
-      <input type="date" id="f-checkIn"  value="${r.checkIn||""}"></div>
-    <div class="field"><label>Check-out</label>
-      <input type="date" id="f-checkOut" value="${r.checkOut||""}"></div>
-  </div>
-  <div class="row2">
-    <div class="field"><label>Adultos</label>
-      <input type="number" id="f-adults"   value="${r.adults||2}"   min="1" max="6"></div>
-    <div class="field"><label>Crianças</label>
-      <input type="number" id="f-children" value="${r.children||0}" min="0" max="4"></div>
-  </div>
-  <div class="field"><label>Telefone / WhatsApp</label>
-    <input id="f-phone" value="${r.phone||""}" placeholder="(44) 99999-9999"></div>
-  <div class="field"><label>Observações</label>
-    <textarea id="f-notes">${r.notes||""}</textarea></div>
-  ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
-  <div style="display:flex;gap:10px;justify-content:flex-end">
-    ${isEdit?`<button class="btn btn-red" onclick="cancelReservation('${r.id}')">Cancelar Reserva</button>`:""}
-    <button class="btn btn-green" onclick="submitForm(${isEdit?`'${r.id}'`:"null"})">
-      ${isEdit?"Salvar Alterações":"Criar Reserva"}
-    </button>
-  </div>`;
-}
-
-function openCasaTodaModal() {
-  document.getElementById("modal-title").innerHTML =
-    `🏡 Reservar Casa Toda <button onclick="closeModal()">×</button>`;
-  const n = ROOMS.length;
-  document.getElementById("modal-body").innerHTML = `
-    <div style="background:#0f1e2b;border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;margin-bottom:18px;font-size:12px;color:#3b82f6">
-      Cria reservas simultâneas para todos os <b>${n} quartos</b> da pousada com os mesmos dados.
-    </div>
-    <div class="field"><label>Canal</label>
-      <select id="ct-source">
-        <option value="direto">Direto</option>
-        <option value="booking">Booking.com</option>
-        <option value="airbnb">Airbnb</option>
-      </select></div>
-    <div class="field"><label>Nome do Hóspede / Grupo</label>
-      <input id="ct-guestName" placeholder="Ex: Família Silva" autofocus></div>
-    <div class="row2">
-      <div class="field"><label>Check-in</label>
-        <input type="date" id="ct-checkIn" value="${todayStr()}"></div>
-      <div class="field"><label>Check-out</label>
-        <input type="date" id="ct-checkOut"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Adultos (total)</label>
-        <input type="number" id="ct-adults" value="18" min="1" max="40"></div>
-      <div class="field"><label>Crianças (total)</label>
-        <input type="number" id="ct-children" value="0" min="0" max="20"></div>
-    </div>
-    <div class="field"><label>Telefone / WhatsApp</label>
-      <input id="ct-phone" placeholder="(44) 99999-9999"></div>
-    <div class="field"><label>Observações</label>
-      <textarea id="ct-notes">Casa toda reservada</textarea></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
-      <button class="btn btn-green" onclick="submitCasaToda()">
-        🏡 Reservar ${n} Quartos
-      </button>
-    </div>`;
-  document.getElementById("modal").style.display="flex";
-}
-
-async function submitCasaToda() {
-  const get = i => document.getElementById(i)?.value||"";
-  const guestName = get("ct-guestName").trim();
-  const checkIn   = get("ct-checkIn");
-  const checkOut  = get("ct-checkOut");
-  const source    = get("ct-source");
-  const adults    = +get("ct-adults")||18;
-  const children  = +get("ct-children")||0;
-  const phone     = get("ct-phone");
-  const notes     = get("ct-notes");
-
-  if (!guestName || !checkIn || !checkOut || checkOut <= checkIn) {
-    alert("Preencha nome, check-in e check-out corretamente."); return;
-  }
-
-  const groupId = genId();
-  const suiteGroupId = genId();
-
-  // Desabilita botão
-  const btn = document.querySelector(".modal .btn-green");
-  if (btn) { btn.disabled = true; btn.textContent = "⏳ Criando..."; }
-
-  for (const room of ROOMS) {
-    await saveReservation({
-      id:        genId(),
-      roomId:    room.id,
-      guestName,
-      checkIn, checkOut, source, phone,
-      adults:   Math.round(adults / ROOMS.length),
-      children: Math.round(children / ROOMS.length),
-      notes:    notes + ` [Casa toda:${groupId}]`
-        + (room.id==="11"||room.id==="12" ? ` [Suíte grupo:${suiteGroupId}]` : ""),
-      status: "confirmed",
-    });
-  }
-
-  closeModal();
-}
-
-function openSuiteModal() {
-  document.getElementById("modal-title").innerHTML =
-    `🔗 Reservar Suíte 11+12 <button onclick="closeModal()">×</button>`;
-  document.getElementById("modal-body").innerHTML = reservationForm({
-    roomId:"11+12", guestName:"", checkIn:todayStr(), checkOut:"",
-    source:"direto", adults:4, children:0, phone:"", notes:"Suíte combinada (quartos 11 e 12)"
-  }, false);
-  document.getElementById("modal").style.display="flex";
-}
-
-async function submitForm(id) {
-  const get = i => document.getElementById(i)?.value||"";
-  const form = {
-    id:        id||genId(),
-    roomId:    get("f-roomId"),
-    guestName: get("f-guestName").trim(),
-    checkIn:   get("f-checkIn"),
-    checkOut:  get("f-checkOut"),
-    source:    get("f-source"),
-    adults:    +get("f-adults")||2,
-    children:  +get("f-children")||0,
-    phone:     get("f-phone"),
-    notes:     get("f-notes"),
-    status:    "confirmed",
+function parseIcal(text, source) {
+  const events = [];
+  const blocks  = text.split("BEGIN:VEVENT");
+  const parseDate = (s) => {
+    const c = s.replace(/[TZ]/g, "").slice(0, 8);
+    return `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`;
   };
-  if (!form.guestName||!form.checkIn||!form.checkOut||form.checkOut<=form.checkIn) {
-    alert("Preencha nome, check-in e check-out corretamente."); return;
+  for (let i = 1; i < blocks.length; i++) {
+    const b   = blocks[i];
+    const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:(.+)")); return m ? m[1].trim() : ""; };
+    const dtstart = get("DTSTART"), dtend = get("DTEND"), summary = get("SUMMARY"), uid = get("UID");
+    if (!dtstart || !dtend) continue;
+    // Só ignora bloqueios se for Airbnb — no Booking "Closed" pode ser reserva real
+    if (source === "airbnb" && isAirbnbBlock(summary, uid)) continue;
+    events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
   }
-
-  // Casa Fechada → uma reserva por quarto, todas vinculadas com mesmo groupId
-  if (form.roomId==="CF") {
-    const cfGroupId = genId();
-    for (const room of ROOMS) {
-      await saveReservation({
-        ...form,
-        id:     genId(),
-        roomId: room.id,
-        notes:  (form.notes||"") + ` [Casa toda:${cfGroupId}]`,
-      });
-    }
-    closeModal(); return;
-  }
-
-  // Suíte 11+12 → cria duas reservas vinculadas
-  if (form.roomId==="11+12") {
-    const suiteGroupId = genId();
-    for (const rid of ["11","12"]) {
-      await saveReservation({
-        ...form,
-        id:       genId(),
-        roomId:   rid,
-        notes:    (form.notes||"") + ` [Suíte grupo:${suiteGroupId}]`,
-      });
-    }
-  } else {
-    await saveReservation(form);
-  }
-  closeModal();
+  return events;
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
-loadAll();
-setInterval(loadAll, 5*60*1000);
-</script>
-</body>
-</html>
+function fetchUrl(url) {
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith("https") ? https : http;
+    let body = "";
+    lib.get(url, { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchUrl(res.headers.location).then(resolve).catch(reject);
+      }
+      res.on("data", d => body += d);
+      res.on("end",  () => resolve(body));
+    }).on("error", reject);
+  });
+}
+
+function genId() { return Math.random().toString(36).slice(2, 10); }
+
+// Health check
+app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+// ── Reservas ──────────────────────────────────────────────────────────────────
+app.get("/reservations", async (req, res) => {
+  const { data, error } = await supabase.from("reservations").select("*").order("check_in");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post("/reservations", async (req, res) => {
+  const b = req.body;
+  if (b.externalUid) {
+    const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
+    if (exists) return res.json({ ok: false, reason: "duplicate" });
+  }
+  const row = {
+    id:           b.id || genId(),
+    room_id:      b.roomId,
+    guest_name:   b.guestName,
+    check_in:     b.checkIn,
+    check_out:    b.checkOut,
+    source:       b.source    || "direto",
+    adults:       b.adults    || 2,
+    children:     b.children  || 0,
+    phone:        b.phone     || "",
+    notes:        b.notes     || "",
+    status:       b.status    || "confirmed",
+    external_uid: b.externalUid || null,
+    created_at:   b.createdAt   || new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from("reservations").insert(row).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, reservation: data });
+});
+
+app.put("/reservations/:id", async (req, res) => {
+  const b   = req.body;
+  const row = {};
+  if (b.roomId)     row.room_id    = b.roomId;
+  if (b.guestName)  row.guest_name = b.guestName;
+  if (b.checkIn)    row.check_in   = b.checkIn;
+  if (b.checkOut)   row.check_out  = b.checkOut;
+  if (b.source)     row.source     = b.source;
+  if (b.adults  !== undefined) row.adults   = b.adults;
+  if (b.children!== undefined) row.children = b.children;
+  if (b.phone   !== undefined) row.phone    = b.phone;
+  if (b.notes   !== undefined) row.notes    = b.notes;
+  if (b.status)     row.status     = b.status;
+  const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+app.delete("/reservations/:id", async (req, res) => {
+  const { error } = await supabase.from("reservations").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// ── URLs iCal ─────────────────────────────────────────────────────────────────
+app.get("/urls", async (req, res) => {
+  const { data } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
+  res.json(data?.value || { booking: {}, airbnb: {} });
+});
+
+app.post("/urls", async (req, res) => {
+  await supabase.from("settings").upsert({ key: "ical_urls", value: req.body });
+  res.json({ ok: true });
+});
+
+// ── Sincronização iCal ────────────────────────────────────────────────────────
+app.post("/sync", async (req, res) => {
+  const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
+  const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
+  const log = ["⏳ Iniciando sincronização..."];
+  let added = 0;
+
+  for (const [source, urls] of Object.entries(icalUrls)) {
+    for (const [roomId, url] of Object.entries(urls || {})) {
+      if (!url) continue;
+      log.push(`🔍 ${source} — Quarto ${roomId}`);
+      try {
+        const text = await fetchUrl(url);
+        if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
+        const evts = parseIcal(text, source);
+        log.push(`   → ${evts.length} reserva(s) encontrada(s)`);
+        for (const ev of evts) {
+          const uid = `${source}-${roomId}-${ev.uid}`;
+
+          // CF → cria reserva em todos os quartos
+          // 11+12 → cria nos dois quartos da suíte
+          const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
+          const targetRooms = roomId === "CF"    ? ALL_ROOMS
+                            : roomId === "11+12" ? ["11","12"]
+                            : [roomId];
+
+          for (const targetRoom of targetRooms) {
+            const roomUid = `${source}-${targetRoom}-${ev.uid}`;
+            const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).single();
+            if (exists) continue;
+            await supabase.from("reservations").insert({
+              id: genId(), room_id: targetRoom, external_uid: roomUid, status: "confirmed",
+              guest_name:  ev.summary || `${source} reserva`,
+              check_in:    ev.checkIn,
+              check_out:   ev.checkOut,
+              source, adults: 2, children: 0, phone: "",
+              notes: roomId === "CF"    ? `Importado via iCal (Casa Fechada) [Casa toda:${roomUid}]`
+                   : roomId === "11+12" ? `Importado via iCal (Suíte 11+12)`
+                   : "Importado via iCal",
+              created_at: new Date().toISOString(),
+            });
+            log.push(`   ✓ Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
+            added++;
+          }
+        }
+      } catch(e) { log.push(`   ✗ Erro: ${e.message}`); }
+    }
+  }
+
+  log.push(`✅ Concluído — ${added} nova(s) reserva(s)`);
+  res.json({ ok: true, log, added });
+});
+
+// ── Proxy iCal ────────────────────────────────────────────────────────────────
+app.get("/proxy-ical", async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send("Parâmetro 'url' obrigatório");
+  const allowed = ["airbnb.com", "booking.com", "ical.booking.com", "airbnb.com.br"];
+  if (!allowed.some(d => url.includes(d))) return res.status(403).send("Domínio não permitido");
+  try {
+    const text = await fetchUrl(url);
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.send(text);
+  } catch(e) { res.status(500).send("Erro: " + e.message); }
+});
+
+// ── Limpeza de bloqueios iCal ─────────────────────────────────────────────────
+app.post("/cleanup-blocked", async (req, res) => {
+  const BLOCKED = [
+    "not available", "blocked", "bloqueado", "unavailable", "indispon",
+    // NÃO inclui "closed" — no Booking.com pode ser reserva real
+  ];
+  // Busca apenas registros do Airbnb
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("id, guest_name, source")
+    .eq("source", "airbnb");
+  if (error) return res.status(500).json({ error: error.message });
+
+  const toDelete = (data||[]).filter(r => {
+    const name = (r.guest_name||"").toLowerCase();
+    return BLOCKED.some(b => name.includes(b));
+  }).map(r => r.id);
+
+  if (toDelete.length === 0) return res.json({ ok: true, deleted: 0 });
+
+  const { error: delErr } = await supabase
+    .from("reservations")
+    .delete()
+    .in("id", toDelete);
+
+  if (delErr) return res.status(500).json({ error: delErr.message });
+  res.json({ ok: true, deleted: toDelete.length });
+});
+
+// ── Arquivos estáticos (DEPOIS das rotas de API) ───────────────────────────────
+app.use(express.static(path.join(__dirname, "build")));
+
+// ── Fallback SPA ──────────────────────────────────────────────────────────────
+app.get("*", (req, res) => {
+  const idx = path.join(__dirname, "build", "index.html");
+  if (fs.existsSync(idx)) res.sendFile(idx);
+  else res.send("PMS Pousada — servidor OK 🏡");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ PMS Pousada rodando na porta ${PORT}`);
+});
