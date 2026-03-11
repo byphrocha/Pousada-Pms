@@ -280,7 +280,8 @@ const BLOCKED_NAMES = [
   /not available/i, /closed/i, /blocked/i,
   /bloqueado/i, /indispon/i, /unavailable/i,
 ];
-const isBlockedName = n => BLOCKED_NAMES.some(p => p.test(n||""));
+// Só filtra bloqueios do Airbnb — no Booking "Closed" pode ser reserva real
+const isAirbnbBlock = r => r.source === "airbnb" && BLOCKED_NAMES.some(p => p.test(r.guestName||""));
 
 async function loadAll() {
   try {
@@ -289,7 +290,7 @@ async function loadAll() {
       api("GET","/urls")
     ]);
     reservations = Array.isArray(res)
-      ? res.map(normalizeRes).filter(r => !isBlockedName(r.guestName))
+      ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
       : [];
     icalUrls = urls || {booking:{},airbnb:{}};
   } catch(e) { console.error(e); }
