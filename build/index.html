@@ -575,10 +575,10 @@ function renderReservas() {
   })
   .sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
 
-  // Agrupa suíte 11+12 em uma linha só
-  list = groupSuiteReservations(list);
-  // Deduplica Casa Fechada → 1 linha CF
+  // Deduplica Casa Fechada PRIMEIRO → 1 linha CF (antes de checar suíte)
   list = groupCasaFechada(list);
+  // Agrupa suíte 11+12 em uma linha só (apenas reservas não-CF)
+  list = groupSuiteReservations(list);
 
   const todayCheckins  = reservations.filter(r=>r.checkIn===t  && r.status!=="cancelled").length;
   const todayCheckouts = reservations.filter(r=>r.checkOut===t && r.status!=="cancelled").length;
@@ -670,7 +670,10 @@ function groupCasaFechada(list) {
   return list.reduce((acc, r) => {
     if (r.notes && r.notes.includes("[Casa toda:")) {
       const m = r.notes.match(/\[Casa toda:([^\]]+)\]/);
-      const key = m ? m[1] : `cf-${r.checkIn}-${r.checkOut}`;
+      // Chave: ID do grupo nas notas, ou fallback por hóspede+datas
+      // (garante agrupamento mesmo que as notas variem levemente entre quartos)
+      const rawKey = m ? m[1] : null;
+      const key = rawKey || `cf-${r.guestName}-${r.checkIn}-${r.checkOut}`;
       if (seen.has(key)) return acc;
       seen.add(key);
       acc.push({ ...r, roomId: "CF", _isCFRow: true });
