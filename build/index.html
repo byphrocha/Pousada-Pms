@@ -15,6 +15,7 @@
   --rd:#ef4444;--rdd:#2b0f0f;
   --bl:#3b82f6;--bld:#0f1e2b;
   --am:#f59e0b;--amd:#2b1e0a;
+  --lp:#a855f7;--lpd:#1e0f2b;
   --bk:#0066cc;--ab:#ff5a5f;--di:#8b5cf6;
 }
 body{background:var(--bg0);color:var(--tx);font-family:'DM Mono',monospace;min-height:100vh;display:flex}
@@ -33,21 +34,22 @@ input,select,textarea{font-family:'DM Mono',monospace}
 #content{flex:1;overflow-y:auto;padding:24px}
 
 /* Cards */
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px}
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
 .kpi{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;text-align:center}
-.kpi .val{font-size:30px;font-weight:700;font-family:'Fraunces',serif;line-height:1}
+.kpi .val{font-size:28px;font-weight:700;font-family:'Fraunces',serif;line-height:1}
 .kpi .lbl{font-size:9px;color:var(--mu);margin-top:4px;letter-spacing:.1em}
 
 /* Room grid */
 .room-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:12px}
-.room-card{border-radius:12px;padding:14px 8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;transition:transform .18s,box-shadow .18s;user-select:none}
+.room-card{border-radius:12px;padding:12px 8px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;transition:transform .18s,box-shadow .18s;user-select:none}
 .room-card:hover{transform:translateY(-3px)}
 .room-dot{position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%}
 .room-num{font-size:20px;font-weight:700;line-height:1}
-.room-icon{font-size:26px}
+.room-icon{font-size:24px}
 .room-type{font-size:9px;text-align:center;line-height:1.3;font-weight:600;max-width:80px}
 .room-climate{font-size:9px;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:99px}
+.clean-btn{margin-top:4px;font-size:9px;padding:3px 8px;border-radius:6px;border:1px solid #a855f7;background:#1e0f2b;color:#a855f7;cursor:pointer;font-family:'DM Mono',monospace;font-weight:700;transition:background .15s}
+.clean-btn:hover{background:#2d1545}
 
 /* Legend */
 .legend{display:flex;gap:18px;margin-bottom:18px;flex-wrap:wrap}
@@ -59,6 +61,12 @@ input,select,textarea{font-family:'DM Mono',monospace}
 .res-row:hover{border-color:var(--bdh)}
 .res-id{width:46px;height:46px;border-radius:10px;background:var(--bg0);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--bl);flex-shrink:0}
 .pill{font-size:10px;padding:2px 9px;border-radius:99px;font-weight:700;letter-spacing:.04em}
+
+/* Date group header */
+.date-group-header{display:flex;align-items:center;gap:12px;margin:20px 0 10px;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--mu);text-transform:uppercase}
+.date-group-header:first-child{margin-top:0}
+.date-group-line{flex:1;height:1px;background:var(--bd)}
+.date-group-badge{background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:3px 10px;white-space:nowrap;font-size:10px}
 
 /* Modal */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
@@ -79,6 +87,7 @@ input,select,textarea{font-family:'DM Mono',monospace}
 .btn-green{background:#166534;border-color:#166534}
 .btn-blue{background:#1e3a5f;border-color:var(--bl);color:var(--bl)}
 .btn-red{background:#4a1010;border-color:var(--rd)}
+.btn-purple{background:#2d1545;border-color:var(--lp);color:var(--lp)}
 .btn-dim{background:var(--bg3)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
@@ -87,6 +96,12 @@ input,select,textarea{font-family:'DM Mono',monospace}
 .filter-bar input{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:8px 12px;font-size:13px;outline:none;width:220px;font-family:'DM Mono',monospace}
 .tab-btn{padding:8px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--mu);cursor:pointer;font-size:11px;font-weight:700;font-family:'DM Mono',monospace}
 .tab-btn.active{background:#1e3a5f;border-color:var(--bl);color:var(--bl)}
+
+/* Date filter */
+.date-filter{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.date-filter label{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.date-filter input[type=date]{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:7px 10px;font-size:12px;outline:none;font-family:'DM Mono',monospace}
+.date-filter .clear-btn{font-size:11px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--bg2);color:var(--mu);cursor:pointer;font-family:'DM Mono',monospace}
 
 /* Sync */
 .log-box{background:#04060d;border:1px solid var(--bd);border-radius:10px;padding:16px;font-family:'DM Mono',monospace;font-size:11px;color:#4ade80;max-height:200px;overflow-y:auto;line-height:1.8;margin-top:16px}
@@ -99,18 +114,25 @@ input,select,textarea{font-family:'DM Mono',monospace}
 .agenda-row{border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px}
 .agenda-room{font-weight:800;font-size:15px}
 
-/* Tabs sync */
-.sync-tabs{display:flex;margin-bottom:0}
-.sync-tab{padding:9px 18px;border:1px solid var(--bd);border-bottom:none;background:var(--bg1);color:var(--mu);cursor:pointer;font-size:12px;font-weight:700;font-family:'DM Mono',monospace;border-radius:8px 8px 0 0}
-.sync-tab.active{background:var(--bg2);color:var(--tx)}
-.sync-panel{background:var(--bg2);border:1px solid var(--bd);border-radius:0 8px 8px 8px;padding:20px}
+/* Suite */
+.suite-wrapper{display:contents}
+.suite-group{grid-column:span 2;display:flex;flex-direction:column;gap:4px;
+  border:2px dashed #f59e0b55;border-radius:14px;padding:8px;position:relative;background:#2b1e0a22}
+.suite-label{font-size:9px;color:#f59e0b;font-weight:700;letter-spacing:.1em;text-align:center;
+  margin-bottom:2px;text-transform:uppercase}
+.suite-rooms{display:flex;gap:8px}
+.suite-rooms .room-card{flex:1}
+.suite-join-btn{font-size:10px;padding:5px 10px;border-radius:7px;border:1px solid #f59e0b;
+  background:#2b1e0a;color:#f59e0b;cursor:pointer;font-family:'DM Mono',monospace;
+  font-weight:700;text-align:center;margin-top:2px;transition:background .15s;width:100%}
+.suite-join-btn:hover{background:#3d2a0f}
 
-/* Status banner */
-.status-banner{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;margin-bottom:20px;border-width:1px;border-style:solid}
-
-@media(max-width:600px){
-  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+@media(max-width:640px){
+  .kpi-grid{grid-template-columns:repeat(3,1fr)}
   .agenda-grid{grid-template-columns:1fr}
+  .filter-bar{flex-direction:column;align-items:stretch}
+  .filter-bar input{width:100%}
+  .suite-group{grid-column:span 2}
 }
 </style>
 </head>
@@ -156,11 +178,16 @@ const ROOMS = [
   {id:"25",type:"Casal+1 Soltr",climate:"AC",cap:3},
 ];
 
-// ─── Utils ────────────────────────────────────────────────────────────────────
-const todayStr = () => new Date().toISOString().split("T")[0];
-const fmtDate  = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR") : "—";
-const genId    = () => Math.random().toString(36).slice(2,10);
-const nights   = (ci,co) => Math.max(0,Math.round((new Date(co)-new Date(ci))/86400000));
+// ─── Suítes (quartos combinados) ─────────────────────────────────────────────
+const SUITES = [
+  { id:"11+12", label:"Suíte 11+12", rooms:["11","12"], type:"Triplo ×2 (Ventilador)", cap:6 }
+];
+const todayStr  = () => new Date().toISOString().split("T")[0];
+const fmtDate   = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+const fmtMonth  = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"}) : "";
+const genId     = () => Math.random().toString(36).slice(2,10);
+const nights    = (ci,co) => Math.max(0,Math.round((new Date(co)-new Date(ci))/86400000));
+const isSameDay = (a,b) => a===b;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let reservations = [];
@@ -169,6 +196,18 @@ let syncLog      = [];
 let icalUrls     = {booking:{},airbnb:{}};
 let filterTab    = "upcoming";
 let searchQ      = "";
+let dateFrom     = "";
+let dateTo       = "";
+let groupByDate  = true;          // agrupamento por data nas reservas
+let cleanedRooms = new Set();     // quartos marcados como limpos hoje
+
+// Chave para limpeza — reseta todo dia
+const CLEAN_KEY  = "cleaned_"+todayStr();
+try { cleanedRooms = new Set(JSON.parse(localStorage.getItem(CLEAN_KEY)||"[]")); } catch{}
+
+function saveClean() {
+  try { localStorage.setItem(CLEAN_KEY, JSON.stringify([...cleanedRooms])); } catch{}
+}
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -184,10 +223,8 @@ async function loadAll() {
       api("GET","/reservations"),
       api("GET","/urls")
     ]);
-    reservations = Array.isArray(res) ? res : [];
+    reservations = Array.isArray(res) ? res.map(normalizeRes) : [];
     icalUrls = urls || {booking:{},airbnb:{}};
-    // normalize field names (server uses snake_case)
-    reservations = reservations.map(normalizeRes);
   } catch(e) { console.error(e); }
   render();
 }
@@ -195,16 +232,16 @@ async function loadAll() {
 function normalizeRes(r) {
   return {
     id:          r.id,
-    roomId:      r.room_id   || r.roomId,
-    guestName:   r.guest_name|| r.guestName,
-    checkIn:     r.check_in  || r.checkIn,
-    checkOut:    r.check_out || r.checkOut,
-    source:      r.source    || "direto",
-    adults:      r.adults    || 2,
-    children:    r.children  || 0,
-    phone:       r.phone     || "",
-    notes:       r.notes     || "",
-    status:      r.status    || "confirmed",
+    roomId:      r.room_id    || r.roomId,
+    guestName:   r.guest_name || r.guestName,
+    checkIn:     r.check_in   || r.checkIn,
+    checkOut:    r.check_out  || r.checkOut,
+    source:      r.source     || "direto",
+    adults:      r.adults     || 2,
+    children:    r.children   || 0,
+    phone:       r.phone      || "",
+    notes:       r.notes      || "",
+    status:      r.status     || "confirmed",
     externalUid: r.external_uid || r.externalUid || null,
     createdAt:   r.created_at   || r.createdAt   || new Date().toISOString(),
   };
@@ -229,17 +266,29 @@ async function cancelReservation(id) {
 // ─── Room helpers ─────────────────────────────────────────────────────────────
 function getRoomStatus(roomId) {
   const t = todayStr();
+  // Se marcado como limpo hoje → livre
+  if (cleanedRooms.has(roomId)) return "free";
   for (const r of reservations) {
     if (r.roomId!==roomId || r.status==="cancelled") continue;
-    if (r.checkIn===t)              return "checkin";
-    if (r.checkOut===t)             return "checkout";
-    if (r.checkIn<t&&r.checkOut>t)  return "occupied";
+    if (r.checkIn===t)             return "checkin";
+    if (r.checkOut===t)            return "cleaning"; // check-out hoje = aguardando limpeza
+    if (r.checkIn<t&&r.checkOut>t) return "occupied";
   }
   return "free";
 }
+
 function getRoomRes(roomId) {
   const t = todayStr();
-  return reservations.find(r=>r.roomId===roomId&&r.status!=="cancelled"&&r.checkIn<=t&&r.checkOut>t);
+  return reservations.find(r=>
+    r.roomId===roomId && r.status!=="cancelled" && r.checkIn<=t && r.checkOut>t
+  );
+}
+
+function markClean(roomId, event) {
+  event.stopPropagation();
+  cleanedRooms.add(roomId);
+  saveClean();
+  render();
 }
 
 const STATUS = {
@@ -247,36 +296,43 @@ const STATUS = {
   occupied:{label:"Ocupado",  color:"#ef4444", bg:"#2b0f0f", icon:"🔒"},
   checkin: {label:"Check-in", color:"#3b82f6", bg:"#0f1e2b", icon:"🔓"},
   checkout:{label:"Check-out",color:"#f59e0b", bg:"#2b1e0a", icon:"🧹"},
+  cleaning:{label:"Limpeza",  color:"#a855f7", bg:"#1e0f2b", icon:"🧹"},
 };
 const SRC_COLOR = {direto:"#8b5cf6",booking:"#0066cc",airbnb:"#ff5a5f"};
 
 // ─── Render engine ────────────────────────────────────────────────────────────
 function render() {
-  const titles = {map:"Mapa de Quartos",reservas:"Reservas",sync:"Sincronizar iCal"};
-  document.getElementById("view-title").textContent = titles[currentView];
+  const titles = {map:"Mapa de Quartos", reservas:"Reservas", sync:"Sincronizar iCal"};
+  document.getElementById("view-title").textContent  = titles[currentView];
   document.getElementById("today-label").textContent =
     new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
   document.querySelectorAll(".nav-btn").forEach((b,i)=>{
     b.classList.toggle("active", ["map","reservas","sync"][i]===currentView);
   });
   const c = document.getElementById("content");
-  if (currentView==="map")     c.innerHTML = renderMap();
-  if (currentView==="reservas")c.innerHTML = renderReservas();
-  if (currentView==="sync")    c.innerHTML = renderSync();
+  if (currentView==="map")      c.innerHTML = renderMap();
+  if (currentView==="reservas") c.innerHTML = renderReservas();
+  if (currentView==="sync")     c.innerHTML = renderSync();
 }
 
 function showView(v) { currentView=v; render(); }
 
 // ─── MAP VIEW ─────────────────────────────────────────────────────────────────
 function renderMap() {
-  const t = todayStr();
-  const occupied  = reservations.filter(r=>r.status!=="cancelled"&&r.checkIn<=t&&r.checkOut>t);
-  const checkins  = reservations.filter(r=>r.checkIn===t&&r.status!=="cancelled");
-  const checkouts = reservations.filter(r=>r.checkOut===t&&r.status!=="cancelled");
+  const t        = todayStr();
+  const occupied = reservations.filter(r=>r.status!=="cancelled"&&r.checkIn<=t&&r.checkOut>t);
+  const checkins = reservations.filter(r=>r.checkIn===t&&r.status!=="cancelled");
+  const checkouts= reservations.filter(r=>r.checkOut===t&&r.status!=="cancelled");
+  const cleaning = ROOMS.filter(r=>getRoomStatus(r.id)==="cleaning");
 
+  // KPIs
   let html = `<div class="kpi-grid">`;
-  [[occupied.length,"#ef4444","Ocupados"],[checkins.length,"#3b82f6","Check-ins"],
-   [checkouts.length,"#f59e0b","Check-outs"],[ROOMS.length-occupied.length,"#22c55e","Disponíveis"]
+  [
+    [occupied.length,  "#ef4444","Ocupados"],
+    [checkins.length,  "#3b82f6","Check-ins"],
+    [checkouts.length, "#f59e0b","Check-outs"],
+    [cleaning.length,  "#a855f7","Em Limpeza"],
+    [ROOMS.length - occupied.length - cleaning.length, "#22c55e","Disponíveis"],
   ].forEach(([v,c,l])=>{
     html+=`<div class="kpi"><div class="val" style="color:${c}">${v}</div><div class="lbl">${l}</div></div>`;
   });
@@ -289,12 +345,53 @@ function renderMap() {
   });
   html+=`</div>`;
 
-  // Room grid
+  // Room grid — quartos 11 e 12 aparecem agrupados como suíte
   html+=`<div class="room-grid">`;
   ROOMS.forEach(room=>{
+    // Quarto 11 → abre o bloco da suíte
+    if (room.id==="11") {
+      const st11 = getRoomStatus("11"), st12 = getRoomStatus("12");
+      const s11  = STATUS[st11],        s12  = STATUS[st12];
+      const res11= getRoomRes("11"),    res12= getRoomRes("12");
+      const suiteOccupied = ["11","12"].every(id=>["occupied","checkin"].includes(getRoomStatus(id)));
+      const bothFree      = ["11","12"].every(id=>getRoomStatus(id)==="free");
+
+      const roomCard = (room, st, s, res) => {
+        const showClean = st==="cleaning";
+        return `<div class="room-card" style="background:${s.bg};border:1.5px solid ${s.color}44"
+          onclick="handleRoomClick('${room.id}')"
+          onmouseenter="this.style.boxShadow='0 8px 24px ${s.color}22'"
+          onmouseleave="this.style.boxShadow='none'">
+          <div class="room-dot" style="background:${s.color};box-shadow:0 0 6px ${s.color}"></div>
+          <div class="room-num" style="color:${s.color}">${room.id}</div>
+          <div class="room-icon">${s.icon}</div>
+          <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
+          <div class="room-climate" style="color:${s.color}">💨 Vent.</div>
+          ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
+          ${showClean?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
+        </div>`;
+      };
+
+      html+=`<div class="suite-group">
+        <div class="suite-label">🔗 Suíte combinada</div>
+        <div class="suite-rooms">
+          ${roomCard(ROOMS.find(r=>r.id==="11"), st11, s11, res11)}
+          ${roomCard(ROOMS.find(r=>r.id==="12"), st12, s12, res12)}
+        </div>
+        ${bothFree
+          ? `<button class="suite-join-btn" onclick="openSuiteModal()">+ Reservar Suíte 11+12 juntos</button>`
+          : suiteOccupied
+            ? `<div style="font-size:9px;color:#f59e0b;text-align:center;padding:3px 0;opacity:.7">Suíte ocupada em conjunto</div>`
+            : ""}
+      </div>`;
+      return; // pula o render individual do 11
+    }
+    if (room.id==="12") return; // já renderizado dentro da suíte
+
     const st  = getRoomStatus(room.id);
     const s   = STATUS[st];
     const res = getRoomRes(room.id);
+    const showCleanBtn = st==="cleaning";
     html+=`<div class="room-card" style="background:${s.bg};border:1.5px solid ${s.color}44"
       onclick="handleRoomClick('${room.id}')"
       onmouseenter="this.style.boxShadow='0 8px 24px ${s.color}22'"
@@ -305,20 +402,20 @@ function renderMap() {
       <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
       <div class="room-climate" style="color:${s.color}">${room.climate==="AC"?"❄ AC":"💨 Vent."}</div>
       ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
+      ${showCleanBtn?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
     </div>`;
   });
   html+=`</div>`;
 
-  // Today agenda
+  // Hoje agenda
   if (checkins.length||checkouts.length) {
-    html+=`<div class="agenda"><div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:14px">
-      AGENDA HOJE</div><div class="agenda-grid">`;
+    html+=`<div class="agenda"><div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:14px">AGENDA HOJE</div>
+    <div class="agenda-grid">`;
     [["CHECK-INS",checkins,"#3b82f6","#0f1e2b"],["CHECK-OUTS",checkouts,"#f59e0b","#2b1e0a"]].forEach(([lbl,list,clr,bg])=>{
       html+=`<div><div class="agenda-lbl" style="color:${clr}">${lbl}</div>`;
       if (!list.length) { html+=`<div style="color:var(--bd);font-size:13px">Nenhum hoje</div>`; }
       list.forEach(r=>{
-        html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44"
-          onclick="handleRoomClick('${r.roomId}')">
+        html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="handleRoomClick('${r.roomId}')">
           <span class="agenda-room" style="color:${clr}">${r.roomId}</span>
           <div>
             <div style="color:var(--tx);font-size:13px;font-weight:600">${r.guestName}</div>
@@ -336,49 +433,105 @@ function renderMap() {
 // ─── RESERVAS VIEW ────────────────────────────────────────────────────────────
 function renderReservas() {
   const t = todayStr();
-  let list = reservations.filter(r=>{
-    if (filterTab==="upcoming") return r.checkIn>=t&&r.status!=="cancelled";
-    if (filterTab==="active")   return r.checkIn<=t&&r.checkOut>t&&r.status!=="cancelled";
-    if (filterTab==="past")     return r.checkOut<t&&r.status!=="cancelled";
-    return true;
-  }).filter(r=>!searchQ||r.guestName.toLowerCase().includes(searchQ.toLowerCase())||r.roomId.includes(searchQ))
-    .sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
 
-  let html=`<div class="filter-bar">
+  // Filtros
+  let list = reservations.filter(r=>{
+    if (filterTab==="upcoming") return r.checkIn>=t && r.status!=="cancelled";
+    if (filterTab==="active")   return r.checkIn<=t && r.checkOut>t && r.status!=="cancelled";
+    if (filterTab==="past")     return r.checkOut<t && r.status!=="cancelled";
+    return true;
+  })
+  .filter(r=>!searchQ || r.guestName.toLowerCase().includes(searchQ.toLowerCase()) || r.roomId.includes(searchQ))
+  .filter(r=>{
+    if (dateFrom && r.checkIn < dateFrom) return false;
+    if (dateTo   && r.checkIn > dateTo)   return false;
+    return true;
+  })
+  .sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
+
+  // Barra de filtros
+  let html=`
+  <div class="filter-bar">
     <input id="search-inp" placeholder="🔍 Buscar hóspede ou quarto..." value="${searchQ}"
       oninput="searchQ=this.value;render()">
-    <div style="display:flex;gap:6px">`;
+    <div style="display:flex;gap:6px;flex-wrap:wrap">`;
   [["upcoming","Futuras"],["active","Ativas"],["past","Passadas"],["all","Todas"]].forEach(([v,l])=>{
     html+=`<button class="tab-btn${filterTab===v?" active":""}" onclick="filterTab='${v}';render()">${l}</button>`;
   });
-  html+=`</div><button class="btn btn-green" style="margin-left:auto" onclick="openNewModal()">+ Nova Reserva</button></div>`;
+  html+=`</div>
+    <button class="btn btn-green" style="margin-left:auto" onclick="openNewModal()">+ Nova Reserva</button>
+  </div>
+
+  <!-- Filtro por data -->
+  <div class="date-filter">
+    <label>De</label>
+    <input type="date" value="${dateFrom}" onchange="dateFrom=this.value;render()">
+    <label>Até</label>
+    <input type="date" value="${dateTo}"   onchange="dateTo=this.value;render()">
+    ${dateFrom||dateTo?`<button class="clear-btn" onclick="dateFrom='';dateTo='';render()">✕ Limpar datas</button>`:""}
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <span style="font-size:10px;color:var(--mu)">Agrupar por mês</span>
+      <div onclick="groupByDate=!groupByDate;render()" style="width:36px;height:20px;border-radius:10px;cursor:pointer;position:relative;
+        background:${groupByDate?"#166534":"var(--bg3)"};border:1px solid ${groupByDate?"#166534":"var(--bd)"};transition:background .2s">
+        <div style="position:absolute;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;
+          transition:left .2s;left:${groupByDate?"18px":"2px"}"></div>
+      </div>
+    </div>
+  </div>`;
 
   if (!list.length) {
     html+=`<div style="text-align:center;color:var(--bd);padding:48px;font-size:15px">Nenhuma reserva encontrada</div>`;
+    return html;
   }
 
-  list.forEach(r=>{
-    const room    = ROOMS.find(rm=>rm.id===r.roomId);
-    const n       = nights(r.checkIn,r.checkOut);
-    const srcClr  = SRC_COLOR[r.source]||"var(--mu)";
-    const cancelled = r.status==="cancelled";
-    html+=`<div class="res-row" style="opacity:${cancelled?.45:1}" onclick="openEditModal('${r.id}')">
-      <div class="res-id">${r.roomId}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:14px">${r.guestName}</div>
-        <div style="font-size:11px;color:var(--mu);margin-top:3px">
-          ${room?.type||""} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>
-          ${r.phone?` · ${r.phone}`:""}
-        </div>
-      </div>
-      <div style="display:flex;gap:7px;align-items:center;flex-shrink:0">
-        <span class="pill" style="background:${srcClr}28;color:${srcClr}">${r.source}</span>
-        ${cancelled?`<span class="pill" style="background:#ef444428;color:#ef4444">cancelado</span>`:""}
-        <span style="color:var(--bd);font-size:20px">›</span>
-      </div>
-    </div>`;
-  });
+  if (groupByDate) {
+    // Agrupar por mês do check-in
+    const groups = {};
+    list.forEach(r=>{
+      const key = r.checkIn.slice(0,7); // "YYYY-MM"
+      if (!groups[key]) groups[key]=[];
+      groups[key].push(r);
+    });
+
+    Object.entries(groups).sort(([a],[b])=>a.localeCompare(b)).forEach(([key,rows])=>{
+      const label = new Date(key+"-01T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
+      html+=`<div class="date-group-header">
+        <div class="date-group-badge">${label.charAt(0).toUpperCase()+label.slice(1)} · ${rows.length} reserva${rows.length!==1?"s":""}</div>
+        <div class="date-group-line"></div>
+      </div>`;
+      rows.forEach(r=>{ html+=resRow(r); });
+    });
+  } else {
+    list.forEach(r=>{ html+=resRow(r); });
+  }
   return html;
+}
+
+function resRow(r) {
+  const room     = ROOMS.find(rm=>rm.id===r.roomId);
+  const n        = nights(r.checkIn, r.checkOut);
+  const srcClr   = SRC_COLOR[r.source]||"var(--mu)";
+  const cancelled= r.status==="cancelled";
+  const isSuite  = r.notes && r.notes.includes("[Suíte grupo:");
+  return `<div class="res-row" style="opacity:${cancelled?.45:1}" onclick="openEditModal('${r.id}')">
+    <div class="res-id" style="${isSuite?"border:1px solid #f59e0b55;color:#f59e0b":""}">${r.roomId}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px">
+        ${r.guestName}
+        ${isSuite?`<span class="pill" style="background:#f59e0b22;color:#f59e0b">🔗 suíte</span>`:""}
+      </div>
+      <div style="font-size:11px;color:var(--mu);margin-top:3px">
+        ${room?.type||""} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}
+        · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>
+        ${r.phone?` · ${r.phone}`:""}
+      </div>
+    </div>
+    <div style="display:flex;gap:7px;align-items:center;flex-shrink:0">
+      <span class="pill" style="background:${srcClr}28;color:${srcClr}">${r.source}</span>
+      ${cancelled?`<span class="pill" style="background:#ef444428;color:#ef4444">cancelado</span>`:""}
+      <span style="color:var(--bd);font-size:20px">›</span>
+    </div>
+  </div>`;
 }
 
 // ─── SYNC VIEW ────────────────────────────────────────────────────────────────
@@ -386,7 +539,7 @@ function renderSync() {
   let html=`<div class="sync-info">
     <b style="color:var(--tx)">Como usar:</b> Cole o link iCal do
     <b style="color:#0066cc">Booking.com</b> e do <b style="color:#ff5a5f">Airbnb</b> para cada quarto.
-    O servidor buscará as reservas automaticamente, evitando overbooking.<br><br>
+    O servidor busca as reservas e evita overbooking.<br><br>
     <b style="color:var(--tx)">Booking:</b> Extranet → Propriedade → Calendário → Exportar iCal<br>
     <b style="color:var(--tx)">Airbnb:</b> Calendário → Exportar → Copiar link
   </div>`;
@@ -398,7 +551,8 @@ function renderSync() {
       const val = (icalUrls[src]||{})[r.id]||"";
       html+=`<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
         <div style="width:32px;color:var(--bl);font-weight:800;font-size:14px;text-align:center">${r.id}</div>
-        <input style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
+        <input style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
+          color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
           value="${val}" placeholder="URL iCal — Qto ${r.id} (${r.type})"
           oninput="setIcalUrl('${src}','${r.id}',this.value)">
       </div>`;
@@ -447,9 +601,41 @@ async function doSync() {
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
 function handleRoomClick(roomId) {
+  const st = getRoomStatus(roomId);
+  if (st==="cleaning") {
+    openCleaningModal(roomId); return;
+  }
   const res = getRoomRes(roomId);
   if (res) openEditModal(res.id);
   else     openNewModal(roomId);
+}
+
+function openCleaningModal(roomId) {
+  const room = ROOMS.find(r=>r.id===roomId);
+  document.getElementById("modal-title").innerHTML =
+    `🧹 Quarto ${roomId} — Limpeza <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="text-align:center;padding:16px 0">
+      <div style="font-size:48px;margin-bottom:16px">🧹</div>
+      <div style="font-size:15px;color:var(--tx);margin-bottom:8px;font-weight:700">
+        Quarto ${roomId} — ${room?.type}
+      </div>
+      <div style="font-size:13px;color:var(--mu);margin-bottom:28px">
+        Check-out realizado hoje. Quarto aguardando limpeza.
+      </div>
+      <button class="btn btn-purple" style="width:100%;font-size:15px;padding:14px"
+        onclick="markCleanFromModal('${roomId}')">
+        ✓ Confirmar Limpeza — Liberar Quarto
+      </button>
+    </div>`;
+  document.getElementById("modal").style.display="flex";
+}
+
+function markCleanFromModal(roomId) {
+  cleanedRooms.add(roomId);
+  saveClean();
+  closeModal();
+  render();
 }
 
 function openNewModal(roomId) {
@@ -476,8 +662,10 @@ function closeModal() {
 }
 
 function reservationForm(r, isEdit) {
-  const roomOpts = ROOMS.map(rm=>
-    `<option value="${rm.id}" ${rm.id===r.roomId?"selected":""}>${rm.id} – ${rm.type}</option>`).join("");
+  const roomOpts = [
+    ...SUITES.map(s=>`<option value="${s.id}" ${s.id===r.roomId?"selected":""}>${s.id} – ${s.label} (até ${s.cap} pessoas)</option>`),
+    ...ROOMS.map(rm=>`<option value="${rm.id}" ${rm.id===r.roomId?"selected":""}>${rm.id} – ${rm.type}</option>`)
+  ].join("");
   const n = r.checkIn&&r.checkOut ? nights(r.checkIn,r.checkOut) : 0;
   return `
   <div class="row2">
@@ -485,22 +673,22 @@ function reservationForm(r, isEdit) {
       <select id="f-roomId"><option value="">—</option>${roomOpts}</select></div>
     <div class="field"><label>Canal</label>
       <select id="f-source">
-        <option value="direto" ${r.source==="direto"?"selected":""}>Direto</option>
-        <option value="booking" ${r.source==="booking"?"selected":""}>Booking.com</option>
-        <option value="airbnb" ${r.source==="airbnb"?"selected":""}>Airbnb</option>
+        <option value="direto"   ${r.source==="direto"  ?"selected":""}>Direto</option>
+        <option value="booking"  ${r.source==="booking" ?"selected":""}>Booking.com</option>
+        <option value="airbnb"   ${r.source==="airbnb"  ?"selected":""}>Airbnb</option>
       </select></div>
   </div>
   <div class="field"><label>Nome do Hóspede</label>
     <input id="f-guestName" value="${r.guestName||""}" placeholder="Nome completo" autofocus></div>
   <div class="row2">
     <div class="field"><label>Check-in</label>
-      <input type="date" id="f-checkIn" value="${r.checkIn||""}"></div>
+      <input type="date" id="f-checkIn"  value="${r.checkIn||""}"></div>
     <div class="field"><label>Check-out</label>
       <input type="date" id="f-checkOut" value="${r.checkOut||""}"></div>
   </div>
   <div class="row2">
     <div class="field"><label>Adultos</label>
-      <input type="number" id="f-adults" value="${r.adults||2}" min="1" max="6"></div>
+      <input type="number" id="f-adults"   value="${r.adults||2}"   min="1" max="6"></div>
     <div class="field"><label>Crianças</label>
       <input type="number" id="f-children" value="${r.children||0}" min="0" max="4"></div>
   </div>
@@ -515,6 +703,16 @@ function reservationForm(r, isEdit) {
       ${isEdit?"Salvar Alterações":"Criar Reserva"}
     </button>
   </div>`;
+}
+
+function openSuiteModal() {
+  document.getElementById("modal-title").innerHTML =
+    `🔗 Reservar Suíte 11+12 <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = reservationForm({
+    roomId:"11+12", guestName:"", checkIn:todayStr(), checkOut:"",
+    source:"direto", adults:4, children:0, phone:"", notes:"Suíte combinada (quartos 11 e 12)"
+  }, false);
+  document.getElementById("modal").style.display="flex";
 }
 
 async function submitForm(id) {
@@ -535,13 +733,27 @@ async function submitForm(id) {
   if (!form.guestName||!form.checkIn||!form.checkOut||form.checkOut<=form.checkIn) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
-  await saveReservation(form);
+
+  // Suíte 11+12 → cria duas reservas vinculadas
+  if (form.roomId==="11+12") {
+    const suiteGroupId = genId();
+    for (const rid of ["11","12"]) {
+      await saveReservation({
+        ...form,
+        id:       genId(),
+        roomId:   rid,
+        notes:    (form.notes||"") + ` [Suíte grupo:${suiteGroupId}]`,
+      });
+    }
+  } else {
+    await saveReservation(form);
+  }
   closeModal();
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 loadAll();
-setInterval(loadAll, 5*60*1000); // Recarrega a cada 5 min
+setInterval(loadAll, 5*60*1000);
 </script>
 </body>
 </html>
