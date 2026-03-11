@@ -213,6 +213,32 @@ app.get("/proxy-ical", async (req, res) => {
   } catch(e) { res.status(500).send("Erro: " + e.message); }
 });
 
+// ── Limpeza de bloqueios iCal ─────────────────────────────────────────────────
+app.post("/cleanup-blocked", async (req, res) => {
+  const BLOCKED = [
+    "not available", "closed", "blocked",
+    "bloqueado", "unavailable", "indisponível",
+  ];
+  // Busca todos e filtra no JS para compatibilidade com Supabase free
+  const { data, error } = await supabase.from("reservations").select("id, guest_name");
+  if (error) return res.status(500).json({ error: error.message });
+
+  const toDelete = (data||[]).filter(r => {
+    const name = (r.guest_name||"").toLowerCase();
+    return BLOCKED.some(b => name.includes(b));
+  }).map(r => r.id);
+
+  if (toDelete.length === 0) return res.json({ ok: true, deleted: 0 });
+
+  const { error: delErr } = await supabase
+    .from("reservations")
+    .delete()
+    .in("id", toDelete);
+
+  if (delErr) return res.status(500).json({ error: delErr.message });
+  res.json({ ok: true, deleted: toDelete.length });
+});
+
 // ── Arquivos estáticos (DEPOIS das rotas de API) ───────────────────────────────
 app.use(express.static(path.join(__dirname, "build")));
 
