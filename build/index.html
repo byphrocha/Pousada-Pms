@@ -669,11 +669,9 @@ function groupCasaFechada(list) {
   const seen = new Set();
   return list.reduce((acc, r) => {
     if (r.notes && r.notes.includes("[Casa toda:")) {
-      const m = r.notes.match(/\[Casa toda:([^\]]+)\]/);
-      // Chave: ID do grupo nas notas, ou fallback por hóspede+datas
-      // (garante agrupamento mesmo que as notas variem levemente entre quartos)
-      const rawKey = m ? m[1] : null;
-      const key = rawKey || `cf-${r.guestName}-${r.checkIn}-${r.checkOut}`;
+      // Sempre agrupa por hóspede+datas — garante deduplicação
+      // independente de como a chave interna foi gerada por quarto
+      const key = `cf-${r.guestName}-${r.checkIn}-${r.checkOut}`;
       if (seen.has(key)) return acc;
       seen.add(key);
       acc.push({ ...r, roomId: "CF", _isCFRow: true });
