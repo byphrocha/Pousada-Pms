@@ -547,7 +547,35 @@ function renderSync() {
   [["booking","🔵 Booking.com","#0066cc"],["airbnb","🔴 Airbnb","#ff5a5f"]].forEach(([src,label,clr])=>{
     html+=`<div style="margin-bottom:22px">
       <div style="font-size:12px;color:${clr};font-weight:700;letter-spacing:.08em;margin-bottom:12px">${label}</div>`;
-    ROOMS.forEach(r=>{
+
+    // Airbnb: suíte 11+12 tem um único link — mostra campo combinado em vez de dois separados
+    const roomsToShow = src==="airbnb"
+      ? ROOMS.filter(r=>r.id!=="11"&&r.id!=="12")
+      : ROOMS;
+
+    if (src==="airbnb") {
+      const val = (icalUrls["airbnb"]||{})["11+12"]||"";
+      html+=`<div style="margin-bottom:10px">
+        <div style="font-size:10px;color:#f59e0b;font-weight:700;letter-spacing:.06em;margin-bottom:6px">
+          🔗 SUÍTE 11+12 (anúncio combinado)
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div style="width:42px;color:#f59e0b;font-weight:800;font-size:12px;text-align:center;
+            background:#2b1e0a;border-radius:6px;padding:4px 2px;border:1px solid #f59e0b44">11+12</div>
+          <input style="flex:1;background:var(--bg0);border:1px solid ${val?"#f59e0b55":"var(--bd)"};border-radius:8px;
+            color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
+            value="${val}" placeholder="URL iCal única do anúncio Suíte 11+12 no Airbnb"
+            oninput="setIcalUrl('airbnb','11+12',this.value)">
+        </div>
+        <div style="font-size:10px;color:var(--mu);margin-top:4px;padding-left:52px">
+          Esta URL criará reservas automaticamente nos quartos 11 e 12 simultaneamente.
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--bd);margin:12px 0 10px"></div>
+      <div style="font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.06em;margin-bottom:8px">QUARTOS INDIVIDUAIS</div>`;
+    }
+
+    roomsToShow.forEach(r=>{
       const val = (icalUrls[src]||{})[r.id]||"";
       html+=`<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
         <div style="width:32px;color:var(--bl);font-weight:800;font-size:14px;text-align:center">${r.id}</div>
