@@ -260,14 +260,20 @@ let searchQ      = "";
 let dateFrom     = "";
 let dateTo       = "";
 let groupByDate  = true;          // agrupamento por data nas reservas
-let cleanedRooms = new Set();     // quartos marcados como limpos hoje
+let cleanedRooms   = new Set();   // quartos marcados como limpos hoje
+let checkedInRooms = new Set();   // quartos com check-in confirmado hoje
 
-// Chave para limpeza — reseta todo dia
-const CLEAN_KEY  = "cleaned_"+todayStr();
-try { cleanedRooms = new Set(JSON.parse(localStorage.getItem(CLEAN_KEY)||"[]")); } catch{}
+// Chaves resetam todo dia
+const CLEAN_KEY    = "cleaned_"+todayStr();
+const CHECKIN_KEY  = "checkedin_"+todayStr();
+try { cleanedRooms   = new Set(JSON.parse(localStorage.getItem(CLEAN_KEY)||"[]")); } catch{}
+try { checkedInRooms = new Set(JSON.parse(localStorage.getItem(CHECKIN_KEY)||"[]")); } catch{}
 
 function saveClean() {
   try { localStorage.setItem(CLEAN_KEY, JSON.stringify([...cleanedRooms])); } catch{}
+}
+function saveCheckedIn() {
+  try { localStorage.setItem(CHECKIN_KEY, JSON.stringify([...checkedInRooms])); } catch{}
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -336,20 +342,28 @@ async function cancelReservation(id) {
 // ─── Room helpers ─────────────────────────────────────────────────────────────
 function getRoomStatus(roomId) {
   const t = todayStr();
-  // Verifica reservas primeiro — check-in hoje tem prioridade sobre "marcado como limpo"
-  for (const r of reservations) {
-    if (r.roomId!==roomId || r.status==="cancelled") continue;
-    if (r.checkIn===t)             return "checkin";   // check-in hoje: sempre azul
-    if (r.checkIn<t&&r.checkOut>t) return "occupied";  // ocupado
+  const hasCheckoutToday = reservations.some(r=>
+    r.roomId===roomId && r.status!=="cancelled" && r.checkOut===t
+  );
+  const hasCheckinToday = reservations.some(r=>
+    r.roomId===roomId && r.status!=="cancelled" && r.checkIn===t
+  );
+
+  // Se tem checkout hoje e ainda não limpou → roxo (limpeza obrigatória antes do próximo check-in)
+  if (hasCheckoutToday && !cleanedRooms.has(roomId)) return "cleaning";
+
+  // Quarto limpo (ou sem checkout hoje) — verifica check-in
+  if (hasCheckinToday) {
+    if (checkedInRooms.has(roomId)) return "occupied"; // check-in confirmado → vermelho
+    return "checkin";                                   // check-in pendente → azul
   }
-  // Só depois verifica checkout/limpeza
-  for (const r of reservations) {
-    if (r.roomId!==roomId || r.status==="cancelled") continue;
-    if (r.checkOut===t) {
-      if (cleanedRooms.has(roomId)) return "free";     // já limpou → livre
-      return "cleaning";                                // checkout hoje → aguardando limpeza
-    }
-  }
+
+  // Ocupado (hóspede já dentro, sem movimento hoje)
+  const isOccupied = reservations.some(r=>
+    r.roomId===roomId && r.status!=="cancelled" && r.checkIn<t && r.checkOut>t
+  );
+  if (isOccupied) return "occupied";
+
   return "free";
 }
 
@@ -358,6 +372,13 @@ function getRoomRes(roomId) {
   return reservations.find(r=>
     r.roomId===roomId && r.status!=="cancelled" && r.checkIn<=t && r.checkOut>t
   );
+}
+
+function markCheckedIn(roomId, event) {
+  if (event) event.stopPropagation();
+  checkedInRooms.add(roomId);
+  saveCheckedIn();
+  render();
 }
 
 function markClean(roomId, event) {
@@ -498,6 +519,7 @@ function renderMap() {
           <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
           <div class="room-climate" style="color:${s.color}">💨 Vent.</div>
           ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
+          ${st==="checkin"?`<button class="clean-btn" style="background:#1e3a5f;color:#3b82f6;border-color:#3b82f644" onclick="markCheckedIn('${room.id}',event)">✓ Check-in</button>`:""}
           ${showClean?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
         </div>`;
       };
@@ -533,6 +555,7 @@ function renderMap() {
       <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
       <div class="room-climate" style="color:${s.color}">${room.climate==="AC"?"❄ AC":"💨 Vent."}</div>
       ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
+      ${st==="checkin"?`<button class="clean-btn" style="background:#1e3a5f;color:#3b82f6;border-color:#3b82f644" onclick="markCheckedIn('${room.id}',event)">✓ Check-in</button>`:""}
       ${showCleanBtn?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
     </div>`;
   });
@@ -900,12 +923,42 @@ async function doSync() {
 // ─── Modals ───────────────────────────────────────────────────────────────────
 function handleRoomClick(roomId) {
   const st = getRoomStatus(roomId);
-  if (st==="cleaning") {
-    openCleaningModal(roomId); return;
-  }
+  if (st==="cleaning") { openCleaningModal(roomId); return; }
+  if (st==="checkin")  { openCheckinModal(roomId);  return; }
   const res = getRoomRes(roomId);
   if (res) openEditModal(res.id);
   else     openNewModal(roomId);
+}
+
+function openCheckinModal(roomId) {
+  const room = ROOMS.find(r=>r.id===roomId);
+  const res  = getRoomRes(roomId);
+  document.getElementById("modal-title").innerHTML =
+    `🔓 Quarto ${roomId} — Check-in <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="text-align:center;padding:16px 0">
+      <div style="font-size:48px;margin-bottom:16px">🔓</div>
+      <div style="font-size:18px;font-weight:700;margin-bottom:6px">${res?.guestName||"Hóspede"}</div>
+      <div style="font-size:13px;color:var(--mu);margin-bottom:28px">
+        Check-in previsto hoje · ${room?.type||""}
+      </div>
+      <button class="btn btn-blue" style="width:100%;font-size:15px;padding:14px"
+        onclick="markCheckedInFromModal('${roomId}')">
+        ✓ Confirmar Check-in — Hóspede chegou
+      </button>
+      <div style="margin-top:10px">
+        <button class="btn" style="width:100%;font-size:13px" onclick="closeModal();${res?`openEditModal('${res.id}')`:""}"
+        >✏ Ver / Editar Reserva</button>
+      </div>
+    </div>`;
+  document.getElementById("modal").style.display="flex";
+}
+
+function markCheckedInFromModal(roomId) {
+  checkedInRooms.add(roomId);
+  saveCheckedIn();
+  closeModal();
+  render();
 }
 
 function openCleaningModal(roomId) {
