@@ -179,7 +179,7 @@ app.post("/sync", async (req, res) => {
               check_in:    ev.checkIn,
               check_out:   ev.checkOut,
               source, adults: 2, children: 0, phone: "",
-              notes: roomId === "CF"    ? `Importado via iCal (Casa Fechada) [Casa toda:${roomUid}]`
+              notes: roomId === "CF"    ? `Importado via iCal (Casa Fechada) [Casa toda:cf-${ev.uid}]`
                    : roomId === "11+12" ? `Importado via iCal (Suíte 11+12)`
                    : "Importado via iCal",
               created_at: new Date().toISOString(),
