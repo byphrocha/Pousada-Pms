@@ -162,8 +162,12 @@ app.post("/sync", async (req, res) => {
         for (const ev of evts) {
           const uid = `${source}-${roomId}-${ev.uid}`;
 
-          // Suíte 11+12 → cria reservas nos dois quartos
-          const targetRooms = roomId === "11+12" ? ["11","12"] : [roomId];
+          // CF → cria reserva em todos os quartos
+          // 11+12 → cria nos dois quartos da suíte
+          const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
+          const targetRooms = roomId === "CF"    ? ALL_ROOMS
+                            : roomId === "11+12" ? ["11","12"]
+                            : [roomId];
 
           for (const targetRoom of targetRooms) {
             const roomUid = `${source}-${targetRoom}-${ev.uid}`;
@@ -175,9 +179,9 @@ app.post("/sync", async (req, res) => {
               check_in:    ev.checkIn,
               check_out:   ev.checkOut,
               source, adults: 2, children: 0, phone: "",
-              notes: roomId === "11+12"
-                ? `Importado via iCal (Suíte 11+12)`
-                : "Importado via iCal",
+              notes: roomId === "CF"    ? `Importado via iCal (Casa Fechada) [Casa toda:${roomUid}]`
+                   : roomId === "11+12" ? `Importado via iCal (Suíte 11+12)`
+                   : "Importado via iCal",
               created_at: new Date().toISOString(),
             });
             log.push(`   ✓ Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
