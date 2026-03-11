@@ -276,13 +276,21 @@ async function api(method, path, body) {
   return r.json();
 }
 
+const BLOCKED_NAMES = [
+  /not available/i, /closed/i, /blocked/i,
+  /bloqueado/i, /indispon/i, /unavailable/i,
+];
+const isBlockedName = n => BLOCKED_NAMES.some(p => p.test(n||""));
+
 async function loadAll() {
   try {
     const [res, urls] = await Promise.all([
       api("GET","/reservations"),
       api("GET","/urls")
     ]);
-    reservations = Array.isArray(res) ? res.map(normalizeRes) : [];
+    reservations = Array.isArray(res)
+      ? res.map(normalizeRes).filter(r => !isBlockedName(r.guestName))
+      : [];
     icalUrls = urls || {booking:{},airbnb:{}};
   } catch(e) { console.error(e); }
   render();
@@ -692,9 +700,10 @@ function renderSync() {
     html+=`</div>`;
   });
 
-  html+=`<div style="display:flex;gap:10px;margin-bottom:16px">
+  html+=`<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
     <button class="btn btn-green" onclick="saveUrls()">💾 Salvar URLs</button>
     <button class="btn btn-blue" id="sync-btn" onclick="doSync()">🔄 Sincronizar Agora</button>
+    <button class="btn btn-red" id="clean-btn" onclick="doCleanup()" title="Remove registros 'Not available', 'Closed', 'Blocked' etc do banco">🗑 Limpar Bloqueios</button>
   </div>`;
 
   if (syncLog.length) {
@@ -711,6 +720,26 @@ function setIcalUrl(src, roomId, val) {
 async function saveUrls() {
   await api("POST","/urls", icalUrls);
   alert("URLs salvas com sucesso!");
+}
+
+async function doCleanup() {
+  const btn = document.getElementById("clean-btn");
+  if (btn) btn.disabled = true;
+  syncLog = ["🗑 Removendo bloqueios do banco..."];
+  render();
+  try {
+    const data = await api("POST", "/cleanup-blocked");
+    if (data.ok) {
+      syncLog = [`✅ ${data.deleted} registro(s) de bloqueio removido(s) do banco.`];
+    } else {
+      syncLog = ["✗ Erro: " + (data.error||"desconhecido")];
+    }
+  } catch(e) {
+    syncLog = ["✗ Erro: " + e.message];
+  }
+  if (btn) btn.disabled = false;
+  render();
+  await loadAll();
 }
 
 async function doSync() {
