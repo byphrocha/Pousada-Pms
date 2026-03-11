@@ -336,13 +336,19 @@ async function cancelReservation(id) {
 // ─── Room helpers ─────────────────────────────────────────────────────────────
 function getRoomStatus(roomId) {
   const t = todayStr();
-  // Se marcado como limpo hoje → livre
-  if (cleanedRooms.has(roomId)) return "free";
+  // Verifica reservas primeiro — check-in hoje tem prioridade sobre "marcado como limpo"
   for (const r of reservations) {
     if (r.roomId!==roomId || r.status==="cancelled") continue;
-    if (r.checkIn===t)             return "checkin";
-    if (r.checkOut===t)            return "cleaning"; // check-out hoje = aguardando limpeza
-    if (r.checkIn<t&&r.checkOut>t) return "occupied";
+    if (r.checkIn===t)             return "checkin";   // check-in hoje: sempre azul
+    if (r.checkIn<t&&r.checkOut>t) return "occupied";  // ocupado
+  }
+  // Só depois verifica checkout/limpeza
+  for (const r of reservations) {
+    if (r.roomId!==roomId || r.status==="cancelled") continue;
+    if (r.checkOut===t) {
+      if (cleanedRooms.has(roomId)) return "free";     // já limpou → livre
+      return "cleaning";                                // checkout hoje → aguardando limpeza
+    }
   }
   return "free";
 }
