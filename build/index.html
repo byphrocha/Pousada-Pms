@@ -128,11 +128,70 @@ input,select,textarea{font-family:'DM Mono',monospace}
 .suite-join-btn:hover{background:#3d2a0f}
 
 @media(max-width:640px){
-  .kpi-grid{grid-template-columns:repeat(3,1fr)}
-  .agenda-grid{grid-template-columns:1fr}
-  .filter-bar{flex-direction:column;align-items:stretch}
-  .filter-bar input{width:100%}
+  /* Layout: sidebar vira bottom nav */
+  body{flex-direction:column}
+  #sidebar{
+    width:100%; height:58px; flex-direction:row;
+    border-right:none; border-top:1px solid var(--bd);
+    padding:0 8px; gap:0;
+    order:2; position:fixed; bottom:0; left:0; right:0; z-index:100;
+    justify-content:space-around;
+  }
+  #sidebar .logo{display:none}
+  .nav-btn{
+    border-left:none; border-top:3px solid transparent;
+    border-radius:8px; flex:1; height:48px;
+    flex-direction:column; font-size:18px; gap:2px;
+  }
+  .nav-btn.active{border-top-color:var(--bl);background:var(--bg3)}
+  #main{order:1; overflow:hidden; padding-bottom:58px}
+  #topbar{padding:10px 14px}
+  #topbar h1{font-size:15px}
+  #topbar .sub{display:none}
+  #topbar .btn{font-size:11px;padding:7px 12px}
+  #content{padding:14px}
+
+  /* KPIs: 3 por linha */
+  .kpi-grid{grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+  .kpi .val{font-size:22px}
+  .kpi .lbl{font-size:8px}
+
+  /* Room grid: menor */
+  .room-grid{grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px}
+  .room-card{padding:10px 6px 8px}
+  .room-num{font-size:17px}
+  .room-icon{font-size:20px}
+
+  /* Suite */
   .suite-group{grid-column:span 2}
+
+  /* Agenda */
+  .agenda-grid{grid-template-columns:1fr}
+  .agenda{margin-top:18px;padding-top:14px}
+
+  /* Reservas */
+  .filter-bar{gap:7px}
+  .filter-bar input{width:100%;order:-1}
+  .filter-bar>div{overflow-x:auto;-webkit-overflow-scrolling:touch;
+    display:flex;gap:6px;padding-bottom:2px;max-width:100%}
+  .filter-bar>div::-webkit-scrollbar{display:none}
+  .tab-btn{white-space:nowrap;font-size:10px;padding:7px 10px}
+  .filter-bar .btn{white-space:nowrap}
+
+  .date-filter{gap:6px}
+  .date-filter>div:last-child{margin-left:0;width:100%;justify-content:flex-end}
+
+  /* Res row compacto */
+  .res-row{padding:10px 12px;gap:10px}
+  .res-id{width:38px;height:38px;font-size:14px}
+
+  /* Modal: full screen no mobile */
+  .overlay{padding:0;align-items:flex-end}
+  .modal{border-radius:16px 16px 0 0;max-height:88vh;padding:20px 16px}
+
+  /* Legend scroll horizontal */
+  .legend{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  .legend::-webkit-scrollbar{display:none}
 }
 </style>
 </head>
