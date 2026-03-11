@@ -26,24 +26,18 @@ app.use((req, res, next) => {
 });
 
 // Utilitários iCal
-const BLOCKED_PATTERNS = [
-  /not available/i,
-  /airbnb \(not available\)/i,
-  /^blocked$/i,
-  /^closed$/i,
-  /unavailable/i,
-  /bloqueado/i,
-  /indisponível/i,
+const AIRBNB_BLOCKED = [
+  /not available/i, /^blocked$/i, /unavailable/i,
+  /bloqueado/i, /indispon/i,
 ];
 
-function isBlockedEvent(summary, uid) {
-  if (BLOCKED_PATTERNS.some(p => p.test(summary))) return true;
-  // UIDs do Airbnb para bloqueios manuais costumam conter "CLOSED" ou "BLOCK"
-  if (/CLOSED|BLOCK/i.test(uid) && !summary) return true;
+function isAirbnbBlock(summary, uid) {
+  if (AIRBNB_BLOCKED.some(p => p.test(summary||""))) return true;
+  if (/CLOSED|BLOCK/i.test(uid||"") && !summary) return true;
   return false;
 }
 
-function parseIcal(text) {
+function parseIcal(text, source) {
   const events = [];
   const blocks  = text.split("BEGIN:VEVENT");
   const parseDate = (s) => {
@@ -55,7 +49,8 @@ function parseIcal(text) {
     const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:(.+)")); return m ? m[1].trim() : ""; };
     const dtstart = get("DTSTART"), dtend = get("DTEND"), summary = get("SUMMARY"), uid = get("UID");
     if (!dtstart || !dtend) continue;
-    if (isBlockedEvent(summary, uid)) continue; // ignora datas bloqueadas
+    // Só ignora bloqueios se for Airbnb — no Booking "Closed" pode ser reserva real
+    if (source === "airbnb" && isAirbnbBlock(summary, uid)) continue;
     events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
   }
   return events;
@@ -162,7 +157,7 @@ app.post("/sync", async (req, res) => {
       try {
         const text = await fetchUrl(url);
         if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
-        const evts = parseIcal(text);
+        const evts = parseIcal(text, source);
         // conta bloqueios ignorados para transparência no log
         const totalRaw = (text.match(/BEGIN:VEVENT/g)||[]).length;
         const skipped  = totalRaw - evts.length;
@@ -216,11 +211,14 @@ app.get("/proxy-ical", async (req, res) => {
 // ── Limpeza de bloqueios iCal ─────────────────────────────────────────────────
 app.post("/cleanup-blocked", async (req, res) => {
   const BLOCKED = [
-    "not available", "closed", "blocked",
-    "bloqueado", "unavailable", "indisponível",
+    "not available", "blocked", "bloqueado", "unavailable", "indispon",
+    // NÃO inclui "closed" — no Booking.com pode ser reserva real
   ];
-  // Busca todos e filtra no JS para compatibilidade com Supabase free
-  const { data, error } = await supabase.from("reservations").select("id, guest_name");
+  // Busca apenas registros do Airbnb
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("id, guest_name, source")
+    .eq("source", "airbnb");
   if (error) return res.status(500).json({ error: error.message });
 
   const toDelete = (data||[]).filter(r => {
