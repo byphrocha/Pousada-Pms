@@ -434,11 +434,12 @@ function renderMap() {
 function renderReservas() {
   const t = todayStr();
 
-  // Filtros
   let list = reservations.filter(r=>{
-    if (filterTab==="upcoming") return r.checkIn>=t && r.status!=="cancelled";
-    if (filterTab==="active")   return r.checkIn<=t && r.checkOut>t && r.status!=="cancelled";
-    if (filterTab==="past")     return r.checkOut<t && r.status!=="cancelled";
+    if (filterTab==="upcoming")  return r.checkIn>=t   && r.status!=="cancelled";
+    if (filterTab==="active")    return r.checkIn<=t   && r.checkOut>t && r.status!=="cancelled";
+    if (filterTab==="past")      return r.checkOut<t   && r.status!=="cancelled";
+    if (filterTab==="checkins")  return r.checkIn===t  && r.status!=="cancelled";
+    if (filterTab==="checkouts") return r.checkOut===t && r.status!=="cancelled";
     return true;
   })
   .filter(r=>!searchQ || r.guestName.toLowerCase().includes(searchQ.toLowerCase()) || r.roomId.includes(searchQ))
@@ -449,20 +450,33 @@ function renderReservas() {
   })
   .sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
 
-  // Barra de filtros
+  // Agrupa suíte 11+12 em uma linha só
+  list = groupSuiteReservations(list);
+
+  const todayCheckins  = reservations.filter(r=>r.checkIn===t  && r.status!=="cancelled").length;
+  const todayCheckouts = reservations.filter(r=>r.checkOut===t && r.status!=="cancelled").length;
+
   let html=`
   <div class="filter-bar">
     <input id="search-inp" placeholder="🔍 Buscar hóspede ou quarto..." value="${searchQ}"
       oninput="searchQ=this.value;render()">
     <div style="display:flex;gap:6px;flex-wrap:wrap">`;
-  [["upcoming","Futuras"],["active","Ativas"],["past","Passadas"],["all","Todas"]].forEach(([v,l])=>{
+
+  [
+    ["upcoming","Futuras"],
+    ["active","Ativas"],
+    ["checkins",  `✈ Check-ins${todayCheckins   ? ` <span style="background:#3b82f633;color:#3b82f6;border-radius:99px;padding:1px 6px;font-size:9px">${todayCheckins}</span>`   :""}`],
+    ["checkouts", `🧹 Check-outs${todayCheckouts ? ` <span style="background:#f59e0b33;color:#f59e0b;border-radius:99px;padding:1px 6px;font-size:9px">${todayCheckouts}</span>` :""}`],
+    ["past","Passadas"],
+    ["all","Todas"],
+  ].forEach(([v,l])=>{
     html+=`<button class="tab-btn${filterTab===v?" active":""}" onclick="filterTab='${v}';render()">${l}</button>`;
   });
+
   html+=`</div>
     <button class="btn btn-green" style="margin-left:auto" onclick="openNewModal()">+ Nova Reserva</button>
   </div>
 
-  <!-- Filtro por data -->
   <div class="date-filter">
     <label>De</label>
     <input type="date" value="${dateFrom}" onchange="dateFrom=this.value;render()">
@@ -477,7 +491,15 @@ function renderReservas() {
           transition:left .2s;left:${groupByDate?"18px":"2px"}"></div>
       </div>
     </div>
-  </div>`;
+  </div>
+
+  ${filterTab==="checkins"  ? `<div style="background:#0f1e2b;border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#3b82f6">
+    ✈ Check-ins de hoje — ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}
+    ${todayCheckins===0?"· <b>Nenhum check-in hoje</b>":""}</div>` : ""}
+  ${filterTab==="checkouts" ? `<div style="background:#2b1e0a;border:1px solid #f59e0b44;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#f59e0b">
+    🧹 Check-outs de hoje — ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}
+    ${todayCheckouts===0?"· <b>Nenhum check-out hoje</b>":""}</div>` : ""}
+  `;
 
   if (!list.length) {
     html+=`<div style="text-align:center;color:var(--bd);padding:48px;font-size:15px">Nenhuma reserva encontrada</div>`;
@@ -485,14 +507,12 @@ function renderReservas() {
   }
 
   if (groupByDate) {
-    // Agrupar por mês do check-in
     const groups = {};
     list.forEach(r=>{
-      const key = r.checkIn.slice(0,7); // "YYYY-MM"
+      const key = r.checkIn.slice(0,7);
       if (!groups[key]) groups[key]=[];
       groups[key].push(r);
     });
-
     Object.entries(groups).sort(([a],[b])=>a.localeCompare(b)).forEach(([key,rows])=>{
       const label = new Date(key+"-01T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
       html+=`<div class="date-group-header">
@@ -507,14 +527,39 @@ function renderReservas() {
   return html;
 }
 
+function isSuiteRes(r) {
+  return (r.notes && (r.notes.includes("[Suíte grupo:") || r.notes.includes("Suíte 11+12")))
+    && (r.roomId==="11"||r.roomId==="12");
+}
+
+// Agrupa reservas de suíte para exibir como uma linha só
+function groupSuiteReservations(list) {
+  const grouped = [];
+  const seenSuiteGroups = new Set();
+  list.forEach(r=>{
+    if (isSuiteRes(r)) {
+      // Extrai groupId das notas ou usa checkIn+guestName como chave
+      const groupKey = (r.notes.match(/\[Suíte grupo:([^\]]+)\]/) || [])[1]
+        || `${r.guestName}-${r.checkIn}-${r.checkOut}`;
+      if (seenSuiteGroups.has(groupKey)) return; // já adicionado o par
+      seenSuiteGroups.add(groupKey);
+      grouped.push({ ...r, roomId:"11+12", _isSuiteRow:true, _groupKey:groupKey });
+    } else {
+      grouped.push(r);
+    }
+  });
+  return grouped;
+}
+
 function resRow(r) {
-  const room     = ROOMS.find(rm=>rm.id===r.roomId);
+  const isSuite  = r._isSuiteRow || isSuiteRes(r);
+  const roomLabel= isSuite ? "11+12" : r.roomId;
+  const room     = isSuite ? {type:"Suíte (Triplo ×2, Ventilador)"} : ROOMS.find(rm=>rm.id===r.roomId);
   const n        = nights(r.checkIn, r.checkOut);
   const srcClr   = SRC_COLOR[r.source]||"var(--mu)";
   const cancelled= r.status==="cancelled";
-  const isSuite  = r.notes && r.notes.includes("[Suíte grupo:");
   return `<div class="res-row" style="opacity:${cancelled?.45:1}" onclick="openEditModal('${r.id}')">
-    <div class="res-id" style="${isSuite?"border:1px solid #f59e0b55;color:#f59e0b":""}">${r.roomId}</div>
+    <div class="res-id" style="${isSuite?"border:1px solid #f59e0b55;color:#f59e0b;font-size:13px":""}">${roomLabel}</div>
     <div style="flex:1;min-width:0">
       <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px">
         ${r.guestName}
