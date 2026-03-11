@@ -144,7 +144,7 @@ app.post("/urls", async (req, res) => {
 });
 
 // ── Sincronização iCal ────────────────────────────────────────────────────────
-app.post("/sync", async (req, res) => {
+async function runSync() {
   const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
   const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
   const log = ["⏳ Iniciando sincronização..."];
@@ -160,10 +160,6 @@ app.post("/sync", async (req, res) => {
         const evts = parseIcal(text, source);
         log.push(`   → ${evts.length} reserva(s) encontrada(s)`);
         for (const ev of evts) {
-          const uid = `${source}-${roomId}-${ev.uid}`;
-
-          // CF → cria reserva em todos os quartos
-          // 11+12 → cria nos dois quartos da suíte
           const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
           const targetRooms = roomId === "CF"    ? ALL_ROOMS
                             : roomId === "11+12" ? ["11","12"]
@@ -193,7 +189,12 @@ app.post("/sync", async (req, res) => {
   }
 
   log.push(`✅ Concluído — ${added} nova(s) reserva(s)`);
-  res.json({ ok: true, log, added });
+  return { log, added };
+}
+
+app.post("/sync", async (req, res) => {
+  const result = await runSync();
+  res.json({ ok: true, ...result });
 });
 
 // ── Proxy iCal ────────────────────────────────────────────────────────────────
@@ -250,4 +251,22 @@ app.get("*", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ PMS Pousada rodando na porta ${PORT}`);
+
+  // ── Auto-sync a cada 15 minutos ──────────────────────────────────────────────
+  const SYNC_INTERVAL = 15 * 60 * 1000; // 15 min
+  async function autoSync() {
+    const now = new Date().toLocaleTimeString("pt-BR");
+    console.log(`🔄 [${now}] Auto-sync iniciando...`);
+    try {
+      const { added } = await runSync();
+      if (added > 0) console.log(`   ✓ ${added} nova(s) reserva(s) importada(s)`);
+      else            console.log(`   → Nenhuma novidade`);
+    } catch(e) {
+      console.error(`   ✗ Erro no auto-sync: ${e.message}`);
+    }
+  }
+
+  // Executa imediatamente ao iniciar e depois a cada 15 min
+  setTimeout(autoSync, 10000); // aguarda 10s para o servidor estabilizar
+  setInterval(autoSync, SYNC_INTERVAL);
 });
