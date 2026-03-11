@@ -596,23 +596,46 @@ function renderReservas() {
 }
 
 function isSuiteRes(r) {
-  return (r.notes && (r.notes.includes("[Suíte grupo:") || r.notes.includes("Suíte 11+12")))
-    && (r.roomId==="11"||r.roomId==="12");
+  if (r.roomId!=="11" && r.roomId!=="12") return false;
+  // 1) marcado explicitamente nas notas
+  if (r.notes && (r.notes.includes("[Suíte grupo:") || r.notes.includes("Suíte 11+12"))) return true;
+  return false;
+}
+
+// Retorna chave de agrupamento para um quarto 11 ou 12
+function suiteKey(r) {
+  // prioridade: ID de grupo explícito nas notas
+  const m = (r.notes||"").match(/\[Suíte grupo:([^\]]+)\]/);
+  if (m) return "grp-" + m[1];
+  // fallback: mesmo hóspede + mesmas datas (cobre importações iCal)
+  return `pair-${r.guestName}-${r.checkIn}-${r.checkOut}`;
 }
 
 // Agrupa reservas de suíte para exibir como uma linha só
 function groupSuiteReservations(list) {
   const grouped = [];
-  const seenSuiteGroups = new Set();
+  const seen = new Set();
+
   list.forEach(r=>{
-    if (isSuiteRes(r)) {
-      // Extrai groupId das notas ou usa checkIn+guestName como chave
-      const groupKey = (r.notes.match(/\[Suíte grupo:([^\]]+)\]/) || [])[1]
-        || `${r.guestName}-${r.checkIn}-${r.checkOut}`;
-      if (seenSuiteGroups.has(groupKey)) return; // já adicionado o par
-      seenSuiteGroups.add(groupKey);
-      grouped.push({ ...r, roomId:"11+12", _isSuiteRow:true, _groupKey:groupKey });
+    if (r.roomId!=="11" && r.roomId!=="12") {
+      grouped.push(r); return;
+    }
+    // Quarto 11 ou 12 — verifica se existe par no mesmo período
+    const hasPair = list.some(o =>
+      o.id !== r.id &&
+      ((r.roomId==="11" && o.roomId==="12") || (r.roomId==="12" && o.roomId==="11")) &&
+      o.checkIn === r.checkIn && o.checkOut === r.checkOut &&
+      o.status === r.status
+    );
+
+    if (hasPair) {
+      // Agrupa como suíte — mostra apenas uma linha
+      const key = suiteKey(r) || `pair-${r.guestName}-${r.checkIn}-${r.checkOut}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      grouped.push({ ...r, roomId:"11+12", _isSuiteRow:true });
     } else {
+      // Quarto 11 ou 12 reservado individualmente — mostra normal
       grouped.push(r);
     }
   });
