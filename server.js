@@ -158,10 +158,7 @@ app.post("/sync", async (req, res) => {
         const text = await fetchUrl(url);
         if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
         const evts = parseIcal(text, source);
-        // conta bloqueios ignorados para transparência no log
-        const totalRaw = (text.match(/BEGIN:VEVENT/g)||[]).length;
-        const skipped  = totalRaw - evts.length;
-        log.push(`   → ${evts.length} reserva(s)${skipped>0?` · ${skipped} bloqueio(s) ignorado(s)`:""}`);
+        log.push(`   → ${evts.length} reserva(s) encontrada(s)`);
         for (const ev of evts) {
           const uid = `${source}-${roomId}-${ev.uid}`;
 
