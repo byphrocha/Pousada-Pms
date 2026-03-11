@@ -26,6 +26,23 @@ app.use((req, res, next) => {
 });
 
 // Utilitários iCal
+const BLOCKED_PATTERNS = [
+  /not available/i,
+  /airbnb \(not available\)/i,
+  /^blocked$/i,
+  /^closed$/i,
+  /unavailable/i,
+  /bloqueado/i,
+  /indisponível/i,
+];
+
+function isBlockedEvent(summary, uid) {
+  if (BLOCKED_PATTERNS.some(p => p.test(summary))) return true;
+  // UIDs do Airbnb para bloqueios manuais costumam conter "CLOSED" ou "BLOCK"
+  if (/CLOSED|BLOCK/i.test(uid) && !summary) return true;
+  return false;
+}
+
 function parseIcal(text) {
   const events = [];
   const blocks  = text.split("BEGIN:VEVENT");
@@ -37,7 +54,9 @@ function parseIcal(text) {
     const b   = blocks[i];
     const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:(.+)")); return m ? m[1].trim() : ""; };
     const dtstart = get("DTSTART"), dtend = get("DTEND"), summary = get("SUMMARY"), uid = get("UID");
-    if (dtstart && dtend) events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
+    if (!dtstart || !dtend) continue;
+    if (isBlockedEvent(summary, uid)) continue; // ignora datas bloqueadas
+    events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
   }
   return events;
 }
@@ -144,7 +163,10 @@ app.post("/sync", async (req, res) => {
         const text = await fetchUrl(url);
         if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
         const evts = parseIcal(text);
-        log.push(`   → ${evts.length} evento(s)`);
+        // conta bloqueios ignorados para transparência no log
+        const totalRaw = (text.match(/BEGIN:VEVENT/g)||[]).length;
+        const skipped  = totalRaw - evts.length;
+        log.push(`   → ${evts.length} reserva(s)${skipped>0?` · ${skipped} bloqueio(s) ignorado(s)`:""}`);
         for (const ev of evts) {
           const uid = `${source}-${roomId}-${ev.uid}`;
 
