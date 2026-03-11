@@ -1,22 +1,22 @@
 const express = require("express");
 const https   = require("https");
 const http    = require("http");
+const fs      = require("fs");
 const path    = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// ─── Supabase ─────────────────────────────────────────────────────────────────
+// Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "build")));
 
-// CORS
+// CORS — antes de qualquer rota
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin",  "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── Utilitários iCal ─────────────────────────────────────────────────────────
+// Utilitários iCal
 function parseIcal(text) {
   const events = [];
   const blocks  = text.split("BEGIN:VEVENT");
@@ -58,10 +58,10 @@ function fetchUrl(url) {
 
 function genId() { return Math.random().toString(36).slice(2, 10); }
 
-// ─── Health check (mantém servidor acordado no Render) ────────────────────────
+// Health check
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
-// ─── Reservas ─────────────────────────────────────────────────────────────────
+// ── Reservas ──────────────────────────────────────────────────────────────────
 app.get("/reservations", async (req, res) => {
   const { data, error } = await supabase.from("reservations").select("*").order("check_in");
   if (error) return res.status(500).json({ error: error.message });
@@ -70,7 +70,6 @@ app.get("/reservations", async (req, res) => {
 
 app.post("/reservations", async (req, res) => {
   const b = req.body;
-  // Evitar duplicata por externalUid
   if (b.externalUid) {
     const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
     if (exists) return res.json({ ok: false, reason: "duplicate" });
@@ -81,14 +80,14 @@ app.post("/reservations", async (req, res) => {
     guest_name:   b.guestName,
     check_in:     b.checkIn,
     check_out:    b.checkOut,
-    source:       b.source || "direto",
-    adults:       b.adults || 2,
-    children:     b.children || 0,
-    phone:        b.phone || "",
-    notes:        b.notes || "",
-    status:       b.status || "confirmed",
+    source:       b.source    || "direto",
+    adults:       b.adults    || 2,
+    children:     b.children  || 0,
+    phone:        b.phone     || "",
+    notes:        b.notes     || "",
+    status:       b.status    || "confirmed",
     external_uid: b.externalUid || null,
-    created_at:   b.createdAt || new Date().toISOString(),
+    created_at:   b.createdAt   || new Date().toISOString(),
   };
   const { data, error } = await supabase.from("reservations").insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -96,19 +95,18 @@ app.post("/reservations", async (req, res) => {
 });
 
 app.put("/reservations/:id", async (req, res) => {
-  const b = req.body;
-  const row = {
-    room_id:    b.roomId,
-    guest_name: b.guestName,
-    check_in:   b.checkIn,
-    check_out:  b.checkOut,
-    source:     b.source,
-    adults:     b.adults,
-    children:   b.children,
-    phone:      b.phone,
-    notes:      b.notes,
-    status:     b.status,
-  };
+  const b   = req.body;
+  const row = {};
+  if (b.roomId)     row.room_id    = b.roomId;
+  if (b.guestName)  row.guest_name = b.guestName;
+  if (b.checkIn)    row.check_in   = b.checkIn;
+  if (b.checkOut)   row.check_out  = b.checkOut;
+  if (b.source)     row.source     = b.source;
+  if (b.adults  !== undefined) row.adults   = b.adults;
+  if (b.children!== undefined) row.children = b.children;
+  if (b.phone   !== undefined) row.phone    = b.phone;
+  if (b.notes   !== undefined) row.notes    = b.notes;
+  if (b.status)     row.status     = b.status;
   const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -120,7 +118,7 @@ app.delete("/reservations/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── URLs iCal ────────────────────────────────────────────────────────────────
+// ── URLs iCal ─────────────────────────────────────────────────────────────────
 app.get("/urls", async (req, res) => {
   const { data } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
   res.json(data?.value || { booking: {}, airbnb: {} });
@@ -131,7 +129,7 @@ app.post("/urls", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── Sincronização iCal ───────────────────────────────────────────────────────
+// ── Sincronização iCal ────────────────────────────────────────────────────────
 app.post("/sync", async (req, res) => {
   const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
   const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
@@ -149,17 +147,28 @@ app.post("/sync", async (req, res) => {
         log.push(`   → ${evts.length} evento(s)`);
         for (const ev of evts) {
           const uid = `${source}-${roomId}-${ev.uid}`;
-          const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", uid).single();
-          if (exists) continue;
-          await supabase.from("reservations").insert({
-            id: genId(), room_id: roomId, external_uid: uid, status: "confirmed",
-            guest_name:  ev.summary || `${source} reserva`,
-            check_in:    ev.checkIn, check_out: ev.checkOut,
-            source, adults: 2, children: 0, phone: "",
-            notes: "Importado via iCal", created_at: new Date().toISOString(),
-          });
-          log.push(`   ✓ ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
-          added++;
+
+          // Suíte 11+12 → cria reservas nos dois quartos
+          const targetRooms = roomId === "11+12" ? ["11","12"] : [roomId];
+
+          for (const targetRoom of targetRooms) {
+            const roomUid = `${source}-${targetRoom}-${ev.uid}`;
+            const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).single();
+            if (exists) continue;
+            await supabase.from("reservations").insert({
+              id: genId(), room_id: targetRoom, external_uid: roomUid, status: "confirmed",
+              guest_name:  ev.summary || `${source} reserva`,
+              check_in:    ev.checkIn,
+              check_out:   ev.checkOut,
+              source, adults: 2, children: 0, phone: "",
+              notes: roomId === "11+12"
+                ? `Importado via iCal (Suíte 11+12)`
+                : "Importado via iCal",
+              created_at: new Date().toISOString(),
+            });
+            log.push(`   ✓ Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
+            added++;
+          }
         }
       } catch(e) { log.push(`   ✗ Erro: ${e.message}`); }
     }
@@ -169,7 +178,7 @@ app.post("/sync", async (req, res) => {
   res.json({ ok: true, log, added });
 });
 
-// ─── Proxy iCal ───────────────────────────────────────────────────────────────
+// ── Proxy iCal ────────────────────────────────────────────────────────────────
 app.get("/proxy-ical", async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send("Parâmetro 'url' obrigatório");
@@ -182,10 +191,12 @@ app.get("/proxy-ical", async (req, res) => {
   } catch(e) { res.status(500).send("Erro: " + e.message); }
 });
 
-// ─── Fallback SPA ─────────────────────────────────────────────────────────────
+// ── Arquivos estáticos (DEPOIS das rotas de API) ───────────────────────────────
+app.use(express.static(path.join(__dirname, "build")));
+
+// ── Fallback SPA ──────────────────────────────────────────────────────────────
 app.get("*", (req, res) => {
   const idx = path.join(__dirname, "build", "index.html");
-  const fs  = require("fs");
   if (fs.existsSync(idx)) res.sendFile(idx);
   else res.send("PMS Pousada — servidor OK 🏡");
 });
