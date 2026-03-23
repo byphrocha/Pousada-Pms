@@ -502,8 +502,35 @@ function normalizeRes(r) {
 }
 
 async function saveReservation(form) {
-  if (form.id && reservations.find(r=>r.id===form.id)) {
+  const isExisting = form.id && reservations.find(r=>r.id===form.id);
+  if (isExisting) {
     await api("PUT",`/reservations/${form.id}`, form);
+    // Se editou valor em reserva direta, cria/atualiza transação
+    if (form.amount > 0 && form.source === "direto" && authRole === "admin") {
+      // Verifica se já existe transação vinculada
+      const existing = transactions.find(t => t.reservation_id === form.id);
+      if (existing) {
+        // Atualiza valor
+        await api("PUT", "/transactions/"+existing.id, {
+          ...existing,
+          amount: form.amount,
+          description: `Reserva Qto ${form.roomId} — ${form.guestName}`,
+        });
+      } else {
+        // Cria nova transação
+        await api("POST", "/transactions", {
+          id:             genId(),
+          type:           "income",
+          category:       "reserva_direta",
+          description:    `Reserva Qto ${form.roomId} — ${form.guestName}`,
+          amount:         form.amount,
+          date:           form.checkIn,
+          month:          form.checkIn.slice(0,7),
+          reservation_id: form.id,
+        });
+      }
+      if (finMonth === form.checkIn.slice(0,7)) await loadTransactions(finMonth);
+    }
   } else {
     const res = await api("POST","/reservations", {...form, id:genId()});
     if (res.reservation) reservations.push(normalizeRes(res.reservation));
