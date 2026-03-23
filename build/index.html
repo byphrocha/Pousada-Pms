@@ -496,6 +496,8 @@ function normalizeRes(r) {
     status:      r.status     || "confirmed",
     externalUid: r.external_uid || r.externalUid || null,
     createdAt:   r.created_at   || r.createdAt   || new Date().toISOString(),
+    amount:      r.amount   || 0,
+    payment:     r.payment  || "pix",
   };
 }
 
@@ -1598,6 +1600,17 @@ function reservationForm(r, isEdit) {
     <div class="field"><label>E-mail</label>
       <input id="f-email" value="${r.email||""}" placeholder="email@exemplo.com"></div>
   </div>
+  <div class="row2">
+    <div class="field"><label>Valor Total (R$)</label>
+      <input type="number" id="f-amount" value="${r.amount||""}" min="0" step="0.01" placeholder="0,00"></div>
+    <div class="field"><label>Forma de Pagamento</label>
+      <select id="f-payment">
+        <option value="pix"         ${(r.payment||"pix")==="pix"        ?"selected":""}>PIX</option>
+        <option value="dinheiro"    ${r.payment==="dinheiro"             ?"selected":""}>Dinheiro</option>
+        <option value="cartao"      ${r.payment==="cartao"               ?"selected":""}>Cartão</option>
+        <option value="transferencia" ${r.payment==="transferencia"      ?"selected":""}>Transferência</option>
+      </select></div>
+  </div>
   <div class="field"><label>Observações</label>
     <textarea id="f-notes">${r.notes||""}</textarea></div>
   ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
@@ -1711,6 +1724,8 @@ async function submitForm(id) {
     children:  +get("f-children")||0,
     phone:     get("f-phone"),
     notes:     get("f-notes"),
+    amount:    parseFloat(get("f-amount"))||0,
+    payment:   get("f-payment")||"pix",
     status:    "confirmed",
   };
   if (!form.guestName||!form.checkIn||!form.checkOut||form.checkOut<=form.checkIn) {
@@ -1719,6 +1734,21 @@ async function submitForm(id) {
 
   // Auto-save hóspede (cria se não existir, atualiza telefone se mudou)
   await autoSaveGuest(form.guestName, get("f-phone"), get("f-email"));
+
+  // Cria transação financeira para reservas diretas (não booking/airbnb)
+  if (form.amount > 0 && form.source === "direto" && !id) {
+    await api("POST", "/transactions", {
+      id:          genId(),
+      type:        "income",
+      category:    "reserva_direta",
+      description: `Reserva Qto ${form.roomId === "CF" ? "Casa Fechada" : form.roomId === "11+12" ? "11+12" : form.roomId} — ${form.guestName}`,
+      amount:      form.amount,
+      date:        form.checkIn,
+      month:       form.checkIn.slice(0,7),
+      reservation_id: form.id,
+    });
+    if (finMonth === form.checkIn.slice(0,7)) await loadTransactions(finMonth);
+  }
 
   // Casa Fechada → uma reserva por quarto, todas vinculadas com mesmo groupId
   if (form.roomId==="CF") {
