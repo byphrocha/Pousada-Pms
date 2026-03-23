@@ -342,6 +342,24 @@ app.post("/cleanup-blocked", authMiddleware, adminOnly, async (req, res) => {
   res.json({ ok: true, deleted: toDelete.length });
 });
 
+// ── Estados de quarto (limpeza / check-in) ────────────────────────────────────
+app.get("/room-states", authMiddleware, async (req, res) => {
+  const today = new Date().toISOString().split("T")[0];
+  const { data } = await supabase.from("settings")
+    .select("value").eq("key", "room_states_"+today).single();
+  res.json(data?.value || { cleaned: [], checkedIn: [] });
+});
+
+app.post("/room-states", authMiddleware, async (req, res) => {
+  const today = new Date().toISOString().split("T")[0];
+  const { cleaned, checkedIn } = req.body || {};
+  await supabase.from("settings").upsert({
+    key: "room_states_"+today,
+    value: { cleaned: cleaned||[], checkedIn: checkedIn||[] }
+  });
+  res.json({ ok: true });
+});
+
 app.delete("/guests/:id", authMiddleware, async (req, res) => {
   const { error } = await supabase.from("guests").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
