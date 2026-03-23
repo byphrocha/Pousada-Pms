@@ -366,6 +366,41 @@ app.delete("/guests/:id", authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Transações financeiras (admin only) ───────────────────────────────────────
+app.get("/transactions", authMiddleware, adminOnly, async (req, res) => {
+  const { month, type } = req.query;
+  let query = supabase.from("transactions").select("*").order("date", { ascending: false });
+  if (month) query = query.eq("month", month);
+  if (type)  query = query.eq("type", type);
+  const { data, error } = await query.limit(500);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post("/transactions", authMiddleware, adminOnly, async (req, res) => {
+  const t = req.body;
+  if (!t.id)    t.id = Math.random().toString(36).slice(2,10);
+  if (!t.month) t.month = (t.date || "").slice(0,7);
+  t.created_at = new Date().toISOString();
+  const { data, error } = await supabase.from("transactions").insert(t).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.put("/transactions/:id", authMiddleware, adminOnly, async (req, res) => {
+  const t = { ...req.body };
+  if (t.date) t.month = t.date.slice(0,7);
+  const { data, error } = await supabase.from("transactions").update(t).eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete("/transactions/:id", authMiddleware, adminOnly, async (req, res) => {
+  const { error } = await supabase.from("transactions").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
 // ── Arquivos estáticos (DEPOIS das rotas de API) ───────────────────────────────
 app.use(express.static(path.join(__dirname, "build")));
 
