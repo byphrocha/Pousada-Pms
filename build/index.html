@@ -193,15 +193,51 @@ input,select,textarea{font-family:'DM Mono',monospace}
   .legend{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
   .legend::-webkit-scrollbar{display:none}
 }
+
+/* ─── Login ───────────────────────────────────────────────────────────────── */
+#login-screen{position:fixed;inset:0;background:var(--bg0);display:flex;align-items:center;
+  justify-content:center;z-index:9999}
+#login-screen.hidden{display:none}
+.login-box{background:var(--bg1);border:1px solid var(--bd);border-radius:20px;
+  padding:40px 36px;width:100%;max-width:360px;text-align:center}
+.login-box .logo{font-size:48px;margin-bottom:8px}
+.login-box h2{font-size:20px;font-weight:700;margin-bottom:4px}
+.login-box .sub{font-size:12px;color:var(--mu);margin-bottom:28px}
+.login-box input{width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:10px;
+  padding:12px 14px;color:var(--tx);font-size:14px;margin-bottom:12px;outline:none;box-sizing:border-box}
+.login-box input:focus{border-color:var(--bl)}
+.login-box .err{color:#ef4444;font-size:12px;margin-bottom:10px;min-height:18px}
+.user-badge{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu);cursor:pointer}
+.user-badge:hover{color:var(--tx)}
 </style>
 </head>
 <body>
 
+<!-- Login Screen -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="logo">🏡</div>
+    <h2>PMS Pousada</h2>
+    <div class="sub">Faça login para continuar</div>
+    <input type="text" id="l-user" placeholder="Usuário" autocomplete="username"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <input type="password" id="l-pass" placeholder="Senha" autocomplete="current-password"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="err" id="l-err"></div>
+    <button class="btn btn-green" style="width:100%;padding:13px;font-size:15px" onclick="doLogin()">
+      Entrar
+    </button>
+  </div>
+</div>
+
 <div id="sidebar">
   <div class="logo">🏡</div>
-  <button class="nav-btn active" onclick="showView('map')" title="Mapa de Quartos">🏨</button>
-  <button class="nav-btn" onclick="showView('reservas')" title="Reservas">📋</button>
-  <button class="nav-btn" onclick="showView('sync')" title="Sincronizar iCal">🔄</button>
+  <button class="nav-btn active" onclick="showView('map')" title="Mapa de Quartos" data-view="map">🏨</button>
+  <button class="nav-btn" onclick="showView('reservas')" title="Reservas" data-view="reservas">📋</button>
+  <button class="nav-btn" onclick="showView('hospedes')" title="Hóspedes" data-view="hospedes">👥</button>
+  <button class="nav-btn admin-only" onclick="showView('sync')" title="Sincronizar iCal" data-view="sync">🔄</button>
+  <div style="flex:1"></div>
+  <button class="nav-btn" onclick="showUserMenu()" title="Minha conta" id="user-nav-btn" style="font-size:14px">👤</button>
 </div>
 
 <div id="main">
@@ -252,6 +288,8 @@ const isSameDay = (a,b) => a===b;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let reservations = [];
+let guests       = [];
+let guestSearch  = "";
 let currentView  = "map";
 let syncLog      = [];
 let icalUrls     = {booking:{},airbnb:{}};
@@ -276,12 +314,127 @@ function saveCheckedIn() {
   try { localStorage.setItem(CHECKIN_KEY, JSON.stringify([...checkedInRooms])); } catch{}
 }
 
+// ─── Auth state ──────────────────────────────────────────────────────────────
+let authToken    = localStorage.getItem("pms_token") || "";
+let authRole     = localStorage.getItem("pms_role")  || "";
+let authUsername = localStorage.getItem("pms_user")  || "";
+
+function setAuth(token, role, username) {
+  authToken = token; authRole = role; authUsername = username;
+  localStorage.setItem("pms_token",   token);
+  localStorage.setItem("pms_role",    role);
+  localStorage.setItem("pms_user",    username);
+}
+function clearAuth() {
+  authToken = ""; authRole = ""; authUsername = "";
+  localStorage.removeItem("pms_token");
+  localStorage.removeItem("pms_role");
+  localStorage.removeItem("pms_user");
+}
+
 // ─── API ──────────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
-  const opts = {method, headers:{"Content-Type":"application/json"}};
+  const opts = {method, headers:{"Content-Type":"application/json",
+    ...(authToken ? {"Authorization":"Bearer "+authToken} : {})}};
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
+  if (r.status === 401) { clearAuth(); showLoginScreen(); return {}; }
   return r.json();
+}
+
+async function doLogin() {
+  const username = document.getElementById("l-user")?.value.trim();
+  const password = document.getElementById("l-pass")?.value;
+  const errEl = document.getElementById("l-err");
+  errEl.textContent = "";
+  try {
+    const res = await fetch("/login", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({username, password})
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || "Erro ao entrar"; return; }
+    setAuth(data.token, data.role, data.username);
+    hideLoginScreen();
+    applyRole();
+    await loadAll();
+    render();
+  } catch(e) { errEl.textContent = "Erro de conexão"; }
+}
+
+function showLoginScreen() {
+  document.getElementById("login-screen").classList.remove("hidden");
+}
+function hideLoginScreen() {
+  document.getElementById("login-screen").classList.add("hidden");
+}
+
+function applyRole() {
+  // Esconde itens admin-only para staff
+  document.querySelectorAll(".admin-only").forEach(el => {
+    el.style.display = authRole === "admin" ? "" : "none";
+  });
+  // Se estava na view de sync e é staff, volta pro mapa
+  if (authRole !== "admin" && (currentView === "sync")) {
+    currentView = "map";
+  }
+  // Atualiza tooltip do botão de usuário
+  const btn = document.getElementById("user-nav-btn");
+  if (btn) btn.title = authUsername + " — clique para sair";
+}
+
+function showUserMenu() {
+  const isAdmin = authRole === "admin";
+  document.getElementById("modal-title").innerHTML =
+    `👤 Minha conta <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="margin-bottom:20px">
+      <div style="font-size:15px;font-weight:700">${authUsername}</div>
+      <div style="font-size:12px;color:var(--mu);margin-top:4px">
+        ${isAdmin ? "👑 Administrador" : "👥 Funcionário"}
+      </div>
+    </div>
+    ${isAdmin ? `
+    <div style="margin-bottom:24px">
+      <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:12px">
+        ALTERAR SENHA
+      </div>
+      <input type="password" id="cp-cur" placeholder="Senha atual"
+        style="width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
+        padding:10px 12px;color:var(--tx);font-size:13px;margin-bottom:8px;outline:none;box-sizing:border-box">
+      <input type="password" id="cp-new" placeholder="Nova senha"
+        style="width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
+        padding:10px 12px;color:var(--tx);font-size:13px;margin-bottom:8px;outline:none;box-sizing:border-box">
+      <input type="password" id="cp-new2" placeholder="Confirmar nova senha"
+        style="width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
+        padding:10px 12px;color:var(--tx);font-size:13px;margin-bottom:8px;outline:none;box-sizing:border-box">
+      <button class="btn btn-blue" style="width:100%" onclick="doChangePassword()">
+        Salvar nova senha
+      </button>
+    </div>` : ""}
+    <button class="btn btn-red" style="width:100%" onclick="doLogout()">
+      🚪 Sair
+    </button>`;
+  document.getElementById("modal").style.display = "flex";
+}
+
+async function doChangePassword() {
+  const cur  = document.getElementById("cp-cur")?.value;
+  const nw   = document.getElementById("cp-new")?.value;
+  const nw2  = document.getElementById("cp-new2")?.value;
+  if (!cur || !nw) { alert("Preencha todos os campos"); return; }
+  if (nw !== nw2)  { alert("As senhas não coincidem"); return; }
+  if (nw.length < 6) { alert("Senha deve ter ao menos 6 caracteres"); return; }
+  const res = await api("POST", "/change-password", {currentPassword:cur, newPassword:nw});
+  if (res.ok) { alert("Senha alterada com sucesso!"); closeModal(); }
+  else alert(res.error || "Erro ao alterar senha");
+}
+
+function doLogout() {
+  clearAuth();
+  closeModal();
+  currentView = "map";
+  showLoginScreen();
 }
 
 const BLOCKED_NAMES = [
@@ -293,14 +446,16 @@ const isAirbnbBlock = r => r.source === "airbnb" && BLOCKED_NAMES.some(p => p.te
 
 async function loadAll() {
   try {
-    const [res, urls] = await Promise.all([
+    const [res, urls, gsts] = await Promise.all([
       api("GET","/reservations"),
-      api("GET","/urls")
+      api("GET","/urls"),
+      api("GET","/guests"),
     ]);
     reservations = Array.isArray(res)
       ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
       : [];
     icalUrls = urls || {booking:{},airbnb:{}};
+    guests   = Array.isArray(gsts) ? gsts : [];
   } catch(e) { console.error(e); }
   render();
 }
@@ -399,17 +554,19 @@ const SRC_COLOR = {direto:"#8b5cf6",booking:"#0066cc",airbnb:"#ff5a5f"};
 
 // ─── Render engine ────────────────────────────────────────────────────────────
 function render() {
-  const titles = {map:"Mapa de Quartos", reservas:"Reservas", sync:"Sincronizar iCal"};
-  document.getElementById("view-title").textContent  = titles[currentView];
+  const titles = {map:"Mapa de Quartos", reservas:"Reservas",
+    hospedes:"Hóspedes", sync:"Sincronizar iCal"};
+  document.getElementById("view-title").textContent  = titles[currentView] || "";
   document.getElementById("today-label").textContent =
     new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  document.querySelectorAll(".nav-btn").forEach((b,i)=>{
-    b.classList.toggle("active", ["map","reservas","sync"][i]===currentView);
+  document.querySelectorAll(".nav-btn[data-view]").forEach(b=>{
+    b.classList.toggle("active", b.dataset.view===currentView);
   });
-  const c = document.getElementById("content");
-  if (currentView==="map")      c.innerHTML = renderMap();
-  if (currentView==="reservas") c.innerHTML = renderReservas();
-  if (currentView==="sync")     c.innerHTML = renderSync();
+  const el = document.getElementById("content");
+  if (currentView==="map")      el.innerHTML = renderMap();
+  if (currentView==="reservas") el.innerHTML = renderReservas();
+  if (currentView==="hospedes") el.innerHTML = renderHospedes();
+  if (currentView==="sync")     el.innerHTML = renderSync();
 }
 
 function showView(v) { currentView=v; render(); }
@@ -788,6 +945,139 @@ function resRow(r) {
 }
 
 // ─── SYNC VIEW ────────────────────────────────────────────────────────────────
+// ─── HÓSPEDES VIEW ────────────────────────────────────────────────────────────
+function renderHospedes() {
+  const q = guestSearch.toLowerCase();
+  const list = q
+    ? guests.filter(g =>
+        (g.name||"").toLowerCase().includes(q) ||
+        (g.phone||"").includes(q) ||
+        (g.cpf||"").includes(q) ||
+        (g.email||"").toLowerCase().includes(q)
+      )
+    : guests;
+
+  let html = `
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+    <input id="guest-search-input" value="${guestSearch}"
+      placeholder="🔍 Buscar por nome, telefone, CPF ou e-mail..."
+      style="flex:1;min-width:200px;background:var(--bg1);border:1px solid var(--bd);border-radius:10px;
+      padding:10px 14px;color:var(--tx);font-size:13px;outline:none"
+      oninput="guestSearch=this.value;render()">
+    <button class="btn btn-green" onclick="openGuestModal(null)">+ Novo Hóspede</button>
+  </div>`;
+
+  if (!list.length) {
+    html += `<div style="text-align:center;color:var(--mu);padding:48px 0;font-size:14px">
+      ${q ? "Nenhum hóspede encontrado para ""+guestSearch+""" : "Nenhum hóspede cadastrado ainda."}
+    </div>`;
+    return html;
+  }
+
+  html += `<div style="display:flex;flex-direction:column;gap:8px">`;
+  list.forEach(g => {
+    const resCount = reservations.filter(r =>
+      r.guestName === g.name || r.phone === g.phone
+    ).length;
+    html += `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;
+      padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer"
+      onclick="openGuestModal('${g.id}')">
+      <div style="width:40px;height:40px;border-radius:50%;background:var(--bg3);
+        display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+        👤
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:14px">${g.name}</div>
+        <div style="font-size:11px;color:var(--mu);margin-top:3px">
+          ${g.phone ? "📞 "+g.phone : ""}
+          ${g.email ? " · ✉ "+g.email : ""}
+          ${g.cpf   ? " · 🪪 "+g.cpf  : ""}
+        </div>
+      </div>
+      <div style="flex-shrink:0;text-align:right">
+        <div style="font-size:12px;color:var(--dm);font-weight:600">${resCount} reserva${resCount!==1?"s":""}</div>
+        ${g.address?`<div style="font-size:10px;color:var(--mu);margin-top:2px">📍 ${g.address}</div>`:""}
+      </div>
+      <span style="color:var(--bd);font-size:20px">›</span>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function openGuestModal(guestId) {
+  const g = guestId ? (guests.find(x => x.id === guestId) || {}) : {};
+  const isEdit = !!guestId;
+  // reservas vinculadas a esse hóspede
+  const guestRes = isEdit ? reservations.filter(r =>
+    r.guestName === g.name || (g.phone && r.phone === g.phone)
+  ) : [];
+
+  document.getElementById("modal-title").innerHTML =
+    `${isEdit?"👤 Editar Hóspede":"👤 Novo Hóspede"} <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      <div class="field"><label>Nome *</label>
+        <input id="g-name" value="${g.name||""}" placeholder="Nome completo"></div>
+      <div class="row2">
+        <div class="field"><label>Telefone / WhatsApp</label>
+          <input id="g-phone" value="${g.phone||""}" placeholder="(44) 99999-9999"></div>
+        <div class="field"><label>E-mail</label>
+          <input id="g-email" value="${g.email||""}" placeholder="email@exemplo.com"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>CPF / Documento</label>
+          <input id="g-cpf" value="${g.cpf||""}" placeholder="000.000.000-00"></div>
+        <div class="field"><label>Endereço / Cidade</label>
+          <input id="g-address" value="${g.address||""}" placeholder="Cidade, Estado"></div>
+      </div>
+      <div class="field"><label>Observações</label>
+        <textarea id="g-notes">${g.notes||""}</textarea></div>
+    </div>
+    ${guestRes.length ? `
+    <div style="margin-bottom:20px">
+      <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:10px">
+        HISTÓRICO (${guestRes.length} reserva${guestRes.length!==1?"s":""})
+      </div>
+      ${guestRes.slice(0,5).map(r=>`
+        <div style="background:var(--bg0);border-radius:8px;padding:8px 12px;margin-bottom:6px;
+          font-size:12px;display:flex;justify-content:space-between;align-items:center">
+          <span>Qto ${r.roomId} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</span>
+          <span style="color:var(--mu)">${r.source}</span>
+        </div>`).join("")}
+    </div>` : ""}
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      ${isEdit?`<button class="btn btn-red" onclick="deleteGuest('${g.id}')">Excluir</button>`:""}
+      <button class="btn btn-green" onclick="saveGuest(${isEdit?`'${g.id}'`:"null"})">
+        ${isEdit?"Salvar Alterações":"Cadastrar Hóspede"}
+      </button>
+    </div>`;
+  document.getElementById("modal").style.display = "flex";
+}
+
+async function saveGuest(id) {
+  const g = {
+    id:      id || Math.random().toString(36).slice(2,10),
+    name:    document.getElementById("g-name")?.value.trim(),
+    phone:   document.getElementById("g-phone")?.value.trim(),
+    email:   document.getElementById("g-email")?.value.trim(),
+    cpf:     document.getElementById("g-cpf")?.value.trim(),
+    address: document.getElementById("g-address")?.value.trim(),
+    notes:   document.getElementById("g-notes")?.value.trim(),
+  };
+  if (!g.name) { alert("Nome é obrigatório"); return; }
+  await api("POST", "/guests", g);
+  closeModal();
+  await loadAll();
+}
+
+async function deleteGuest(id) {
+  if (!confirm("Excluir este hóspede? As reservas não serão afetadas.")) return;
+  await api("DELETE", "/guests/"+id);
+  closeModal();
+  await loadAll();
+}
+
 function renderSync() {
   let html=`<div class="sync-info">
     <b style="color:var(--tx)">Como usar:</b> Cole o link iCal do
@@ -1046,8 +1336,12 @@ function reservationForm(r, isEdit) {
     <div class="field"><label>Crianças</label>
       <input type="number" id="f-children" value="${r.children||0}" min="0" max="4"></div>
   </div>
-  <div class="field"><label>Telefone / WhatsApp</label>
-    <input id="f-phone" value="${r.phone||""}" placeholder="(44) 99999-9999"></div>
+  <div class="row2">
+    <div class="field"><label>Telefone / WhatsApp</label>
+      <input id="f-phone" value="${r.phone||""}" placeholder="(44) 99999-9999"></div>
+    <div class="field"><label>E-mail</label>
+      <input id="f-email" value="${r.email||""}" placeholder="email@exemplo.com"></div>
+  </div>
   <div class="field"><label>Observações</label>
     <textarea id="f-notes">${r.notes||""}</textarea></div>
   ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
@@ -1167,6 +1461,9 @@ async function submitForm(id) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
 
+  // Auto-save hóspede (cria se não existir, atualiza telefone se mudou)
+  await autoSaveGuest(form.guestName, get("f-phone"), get("f-email"));
+
   // Casa Fechada → uma reserva por quarto, todas vinculadas com mesmo groupId
   if (form.roomId==="CF") {
     const cfGroupId = genId();
@@ -1198,8 +1495,42 @@ async function submitForm(id) {
   closeModal();
 }
 
+// ─── Auto-save hóspede ────────────────────────────────────────────────────────
+async function autoSaveGuest(name, phone, email) {
+  if (!name) return;
+  // Procura por nome exato ou telefone
+  const existing = guests.find(g =>
+    g.name === name || (phone && g.phone === phone)
+  );
+  if (existing) {
+    // Atualiza phone/email se vieram preenchidos e estavam vazios
+    const needsUpdate =
+      (phone && !existing.phone) || (email && !existing.email);
+    if (needsUpdate) {
+      await api("PUT", "/guests/"+existing.id, {
+        ...existing,
+        phone: phone || existing.phone,
+        email: email || existing.email,
+      });
+    }
+  } else {
+    // Cadastra novo hóspede
+    await api("POST", "/guests", {
+      id:    genId(),
+      name, phone: phone||"", email: email||"",
+      cpf:"", address:"", notes:"",
+    });
+  }
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
-loadAll();
+// Se já tem token salvo, tenta carregar direto; senão mostra login
+if (authToken) {
+  applyRole();
+  loadAll().catch(() => { clearAuth(); showLoginScreen(); });
+} else {
+  showLoginScreen();
+}
 setInterval(loadAll, 5*60*1000);
 </script>
 </body>
