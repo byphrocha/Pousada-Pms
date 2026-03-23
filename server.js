@@ -205,6 +205,8 @@ app.post("/reservations", authMiddleware, async (req, res) => {
     status:       b.status    || "confirmed",
     external_uid: b.externalUid || null,
     created_at:   b.createdAt   || new Date().toISOString(),
+    amount:       b.amount      || 0,
+    payment:      b.payment     || "pix",
   };
   const { data, error } = await supabase.from("reservations").insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -223,6 +225,8 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   if (b.children!== undefined) row.children = b.children;
   if (b.phone   !== undefined) row.phone    = b.phone;
   if (b.notes   !== undefined) row.notes    = b.notes;
+  if (b.amount  !== undefined) row.amount   = b.amount;
+  if (b.payment !== undefined) row.payment  = b.payment;
   if (b.status)     row.status     = b.status;
   const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
