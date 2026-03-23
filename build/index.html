@@ -301,18 +301,26 @@ let groupByDate  = true;          // agrupamento por data nas reservas
 let cleanedRooms   = new Set();   // quartos marcados como limpos hoje
 let checkedInRooms = new Set();   // quartos com check-in confirmado hoje
 
-// Chaves resetam todo dia
-const CLEAN_KEY    = "cleaned_"+todayStr();
-const CHECKIN_KEY  = "checkedin_"+todayStr();
-try { cleanedRooms   = new Set(JSON.parse(localStorage.getItem(CLEAN_KEY)||"[]")); } catch{}
-try { checkedInRooms = new Set(JSON.parse(localStorage.getItem(CHECKIN_KEY)||"[]")); } catch{}
+async function saveRoomStates() {
+  try {
+    await api("POST", "/room-states", {
+      cleaned:   [...cleanedRooms],
+      checkedIn: [...checkedInRooms],
+    });
+  } catch(e) { console.error("saveRoomStates:", e); }
+}
 
-function saveClean() {
-  try { localStorage.setItem(CLEAN_KEY, JSON.stringify([...cleanedRooms])); } catch{}
+async function loadRoomStates() {
+  try {
+    const data = await api("GET", "/room-states");
+    cleanedRooms   = new Set(data.cleaned   || []);
+    checkedInRooms = new Set(data.checkedIn || []);
+  } catch(e) { console.error("loadRoomStates:", e); }
 }
-function saveCheckedIn() {
-  try { localStorage.setItem(CHECKIN_KEY, JSON.stringify([...checkedInRooms])); } catch{}
-}
+
+// saveClean/saveCheckedIn agora salvam no servidor (sincroniza entre dispositivos)
+function saveClean()     { saveRoomStates(); }
+function saveCheckedIn() { saveRoomStates(); }
 
 // ─── Auth state ──────────────────────────────────────────────────────────────
 let authToken    = localStorage.getItem("pms_token") || "";
@@ -446,16 +454,20 @@ const isAirbnbBlock = r => r.source === "airbnb" && BLOCKED_NAMES.some(p => p.te
 
 async function loadAll() {
   try {
-    const [res, urls, gsts] = await Promise.all([
+    const promises = [
       api("GET","/reservations"),
-      api("GET","/urls"),
       api("GET","/guests"),
-    ]);
+      api("GET","/room-states"),
+      authRole === "admin" ? api("GET","/urls") : Promise.resolve(null),
+    ];
+    const [res, gsts, states, urls] = await Promise.all(promises);
     reservations = Array.isArray(res)
       ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
       : [];
-    icalUrls = urls || {booking:{},airbnb:{}};
-    guests   = Array.isArray(gsts) ? gsts : [];
+    guests        = Array.isArray(gsts) ? gsts : [];
+    cleanedRooms   = new Set(states?.cleaned   || []);
+    checkedInRooms = new Set(states?.checkedIn || []);
+    if (urls) icalUrls = urls;
   } catch(e) { console.error(e); }
   render();
 }
