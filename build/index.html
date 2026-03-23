@@ -969,7 +969,7 @@ function renderHospedes() {
 
   if (!list.length) {
     html += `<div style="text-align:center;color:var(--mu);padding:48px 0;font-size:14px">
-      ${q ? "Nenhum hóspede encontrado para ""+guestSearch+""" : "Nenhum hóspede cadastrado ainda."}
+      ${q ? `Nenhum hóspede encontrado para "${guestSearch}"` : "Nenhum hóspede cadastrado ainda."}
     </div>`;
     return html;
   }
