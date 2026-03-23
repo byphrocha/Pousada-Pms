@@ -194,6 +194,10 @@ input,select,textarea{font-family:'DM Mono',monospace}
   .legend::-webkit-scrollbar{display:none}
 }
 
+/* ─── Financeiro ─────────────────────────────────────────────────────────── */
+@media(max-width:640px){
+  .fin-lists{grid-template-columns:1fr !important}
+}
 /* ─── Login ───────────────────────────────────────────────────────────────── */
 #login-screen{position:fixed;inset:0;background:var(--bg0);display:flex;align-items:center;
   justify-content:center;z-index:9999}
@@ -235,6 +239,7 @@ input,select,textarea{font-family:'DM Mono',monospace}
   <button class="nav-btn active" onclick="showView('map')" title="Mapa de Quartos" data-view="map">🏨</button>
   <button class="nav-btn" onclick="showView('reservas')" title="Reservas" data-view="reservas">📋</button>
   <button class="nav-btn" onclick="showView('hospedes')" title="Hóspedes" data-view="hospedes">👥</button>
+  <button class="nav-btn admin-only" onclick="showView('financeiro')" title="Financeiro" data-view="financeiro">💰</button>
   <button class="nav-btn admin-only" onclick="showView('sync')" title="Sincronizar iCal" data-view="sync">🔄</button>
   <div style="flex:1"></div>
   <button class="nav-btn" onclick="showUserMenu()" title="Minha conta" id="user-nav-btn" style="font-size:14px">👤</button>
@@ -288,8 +293,10 @@ const isSameDay = (a,b) => a===b;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let reservations = [];
-let guests       = [];
-let guestSearch  = "";
+let guests        = [];
+let guestSearch   = "";
+let transactions  = [];
+let finMonth      = new Date().toISOString().slice(0,7); // YYYY-MM
 let currentView  = "map";
 let syncLog      = [];
 let icalUrls     = {booking:{},airbnb:{}};
@@ -459,15 +466,17 @@ async function loadAll() {
       api("GET","/guests"),
       api("GET","/room-states"),
       authRole === "admin" ? api("GET","/urls") : Promise.resolve(null),
+      authRole === "admin" ? api("GET","/transactions?month="+finMonth) : Promise.resolve(null),
     ];
-    const [res, gsts, states, urls] = await Promise.all(promises);
+    const [res, gsts, states, urls, txns] = await Promise.all(promises);
     reservations = Array.isArray(res)
       ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
       : [];
     guests        = Array.isArray(gsts) ? gsts : [];
     cleanedRooms   = new Set(states?.cleaned   || []);
     checkedInRooms = new Set(states?.checkedIn || []);
-    if (urls) icalUrls = urls;
+    if (urls)  icalUrls     = urls;
+    if (txns)  transactions = Array.isArray(txns) ? txns : [];
   } catch(e) { console.error(e); }
   render();
 }
@@ -567,7 +576,7 @@ const SRC_COLOR = {direto:"#8b5cf6",booking:"#0066cc",airbnb:"#ff5a5f"};
 // ─── Render engine ────────────────────────────────────────────────────────────
 function render() {
   const titles = {map:"Mapa de Quartos", reservas:"Reservas",
-    hospedes:"Hóspedes", sync:"Sincronizar iCal"};
+    hospedes:"Hóspedes", financeiro:"Financeiro", sync:"Sincronizar iCal"};
   document.getElementById("view-title").textContent  = titles[currentView] || "";
   document.getElementById("today-label").textContent =
     new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
@@ -578,7 +587,8 @@ function render() {
   if (currentView==="map")      el.innerHTML = renderMap();
   if (currentView==="reservas") el.innerHTML = renderReservas();
   if (currentView==="hospedes") el.innerHTML = renderHospedes();
-  if (currentView==="sync")     el.innerHTML = renderSync();
+  if (currentView==="financeiro") el.innerHTML = renderFinanceiro();
+  if (currentView==="sync")       el.innerHTML = renderSync();
 }
 
 function showView(v) { currentView=v; render(); }
@@ -1089,6 +1099,240 @@ async function deleteGuest(id) {
   closeModal();
   await loadAll();
 }
+
+
+// ─── FINANCEIRO VIEW ──────────────────────────────────────────────────────────
+const FIN_CATEGORIES = {
+  // Entradas
+  reserva_direta: { label:"Reserva Direta",   icon:"🏡", type:"income"  },
+  airbnb:         { label:"Airbnb (mensal)",   icon:"🔴", type:"income"  },
+  booking:        { label:"Booking (mensal)",  icon:"🔵", type:"income"  },
+  outro_ingresso: { label:"Outra Receita",     icon:"💵", type:"income"  },
+  // Saídas
+  conta_fixa:     { label:"Conta Fixa",        icon:"💡", type:"expense" },
+  manutencao:     { label:"Manutenção",        icon:"🔧", type:"expense" },
+  compras:        { label:"Compras",           icon:"🛒", type:"expense" },
+  funcionario:    { label:"Funcionários",      icon:"👷", type:"expense" },
+  outro_gasto:    { label:"Outra Despesa",     icon:"📦", type:"expense" },
+};
+
+function fmtMoney(v) {
+  return "R$ " + Number(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtMonthLabel(m) {
+  const [y,mo] = m.split("-");
+  const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+  return months[+mo-1]+" "+y;
+}
+
+async function loadTransactions(month) {
+  if (authRole !== "admin") return;
+  const data = await api("GET", "/transactions?month="+month);
+  transactions = Array.isArray(data) ? data : [];
+  render();
+}
+
+function renderFinanceiro() {
+  const income   = transactions.filter(t=>t.type==="income");
+  const expense  = transactions.filter(t=>t.type==="expense");
+  const totIn    = income.reduce((s,t)=>s+Number(t.amount),0);
+  const totOut   = expense.reduce((s,t)=>s+Number(t.amount),0);
+  const balance  = totIn - totOut;
+
+  // Month navigator
+  const [y,m]    = finMonth.split("-").map(Number);
+  const prevMonth = new Date(y,m-2,1).toISOString().slice(0,7);
+  const nextMonth = new Date(y,m,1).toISOString().slice(0,7);
+  const isCurrentMonth = finMonth === new Date().toISOString().slice(0,7);
+
+  let html = `
+  <!-- Navegação de mês -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    <button class="btn" style="padding:8px 14px" onclick="changeFinMonth('${prevMonth}')">‹</button>
+    <div style="font-size:17px;font-weight:700;flex:1;text-align:center">${fmtMonthLabel(finMonth)}</div>
+    <button class="btn" style="padding:8px 14px" ${isCurrentMonth?"disabled":""} onclick="changeFinMonth('${nextMonth}')">›</button>
+    <button class="btn btn-green" onclick="openTransactionModal(null)">+ Lançamento</button>
+  </div>
+
+  <!-- KPIs -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
+    <div style="background:var(--bg1);border:1px solid #22c55e44;border-radius:12px;padding:16px;text-align:center">
+      <div style="font-size:11px;color:#22c55e;font-weight:700;letter-spacing:.1em;margin-bottom:6px">RECEITAS</div>
+      <div style="font-size:22px;font-weight:700;color:#22c55e;font-family:'Fraunces',serif">${fmtMoney(totIn)}</div>
+    </div>
+    <div style="background:var(--bg1);border:1px solid #ef444444;border-radius:12px;padding:16px;text-align:center">
+      <div style="font-size:11px;color:#ef4444;font-weight:700;letter-spacing:.1em;margin-bottom:6px">DESPESAS</div>
+      <div style="font-size:22px;font-weight:700;color:#ef4444;font-family:'Fraunces',serif">${fmtMoney(totOut)}</div>
+    </div>
+    <div style="background:var(--bg1);border:1px solid ${balance>=0?"#3b82f6":"#f59e0b"}44;border-radius:12px;padding:16px;text-align:center">
+      <div style="font-size:11px;color:${balance>=0?"#3b82f6":"#f59e0b"};font-weight:700;letter-spacing:.1em;margin-bottom:6px">SALDO</div>
+      <div style="font-size:22px;font-weight:700;color:${balance>=0?"#3b82f6":"#f59e0b"};font-family:'Fraunces',serif">${fmtMoney(balance)}</div>
+    </div>
+  </div>
+
+  <!-- Gráfico de barras por categoria -->
+  ${renderFinChart(income, expense)}
+
+  <!-- Listas -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
+    ${renderFinList("income", income)}
+    ${renderFinList("expense", expense)}
+  </div>`;
+
+  return html;
+}
+
+function renderFinChart(income, expense) {
+  // Agrega por categoria
+  const incByCat = {}, expByCat = {};
+  income.forEach(t  => { incByCat[t.category] = (incByCat[t.category]||0)+Number(t.amount); });
+  expense.forEach(t => { expByCat[t.category] = (expByCat[t.category]||0)+Number(t.amount); });
+
+  const allInc = Object.entries(incByCat).sort((a,b)=>b[1]-a[1]);
+  const allExp = Object.entries(expByCat).sort((a,b)=>b[1]-a[1]);
+  const maxVal = Math.max(...allInc.map(x=>x[1]), ...allExp.map(x=>x[1]), 1);
+
+  if (!allInc.length && !allExp.length) return "";
+
+  const bar = (cat, val, color) => {
+    const pct = Math.round((val/maxVal)*100);
+    const info = FIN_CATEGORIES[cat] || {label:cat, icon:"•"};
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="font-size:13px;width:20px;text-align:center">${info.icon}</div>
+      <div style="font-size:11px;color:var(--mu);width:120px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${info.label}</div>
+      <div style="flex:1;background:var(--bg0);border-radius:4px;height:16px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${color};border-radius:4px;transition:width .3s"></div>
+      </div>
+      <div style="font-size:11px;font-weight:600;color:var(--tx);width:90px;text-align:right;flex-shrink:0">${fmtMoney(val)}</div>
+    </div>`;
+  };
+
+  return `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
+    <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:14px">DISTRIBUIÇÃO DO MÊS</div>
+    ${allInc.length ? `<div style="font-size:10px;color:#22c55e;font-weight:700;letter-spacing:.08em;margin-bottom:8px">ENTRADAS</div>
+      ${allInc.map(([k,v])=>bar(k,v,"#22c55e")).join("")}` : ""}
+    ${allExp.length ? `<div style="font-size:10px;color:#ef4444;font-weight:700;letter-spacing:.08em;margin:12px 0 8px">SAÍDAS</div>
+      ${allExp.map(([k,v])=>bar(k,v,"#ef4444")).join("")}` : ""}
+  </div>`;
+}
+
+function renderFinList(type, list) {
+  const isIncome = type === "income";
+  const color    = isIncome ? "#22c55e" : "#ef4444";
+  const title    = isIncome ? "ENTRADAS" : "SAÍDAS";
+
+  if (!list.length) return `
+    <div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
+      <div style="font-size:11px;color:${color};font-weight:700;letter-spacing:.1em;margin-bottom:12px">${title}</div>
+      <div style="text-align:center;color:var(--mu);padding:24px 0;font-size:13px">Nenhum lançamento</div>
+    </div>`;
+
+  return `
+    <div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
+      <div style="font-size:11px;color:${color};font-weight:700;letter-spacing:.1em;margin-bottom:12px">${title}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${list.map(t => {
+          const cat  = FIN_CATEGORIES[t.category] || {label:t.category, icon:"•"};
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;
+            background:var(--bg0);border-radius:8px;cursor:pointer"
+            onclick="openTransactionModal('${t.id}')">
+            <span style="font-size:16px">${cat.icon}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.description}</div>
+              <div style="font-size:10px;color:var(--mu);margin-top:1px">${cat.label} · ${t.date}</div>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:${color};flex-shrink:0">${fmtMoney(t.amount)}</div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function changeFinMonth(month) {
+  finMonth = month;
+  loadTransactions(month);
+}
+
+function openTransactionModal(id) {
+  const t = id ? (transactions.find(x=>x.id===id)||{}) : {};
+  const isEdit = !!id;
+  const today  = new Date().toISOString().split("T")[0];
+
+  const incCats = Object.entries(FIN_CATEGORIES).filter(([,v])=>v.type==="income");
+  const expCats = Object.entries(FIN_CATEGORIES).filter(([,v])=>v.type==="expense");
+
+  document.getElementById("modal-title").innerHTML =
+    `${isEdit?"✏️ Editar":"➕ Novo"} Lançamento <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px">
+      <div class="row2">
+        <div class="field"><label>Tipo</label>
+          <select id="ft-type" onchange="updateFinCatOptions()">
+            <option value="income"  ${(!t.type||t.type==="income") ?"selected":""}>💵 Entrada</option>
+            <option value="expense" ${t.type==="expense"?"selected":""}>💸 Saída</option>
+          </select></div>
+        <div class="field"><label>Categoria</label>
+          <select id="ft-cat"></select></div>
+      </div>
+      <div class="field"><label>Descrição</label>
+        <input id="ft-desc" value="${t.description||""}" placeholder="Ex: Conta de luz de março"></div>
+      <div class="row2">
+        <div class="field"><label>Valor (R$)</label>
+          <input type="number" id="ft-amount" value="${t.amount||""}" min="0" step="0.01" placeholder="0,00"></div>
+        <div class="field"><label>Data</label>
+          <input type="date" id="ft-date" value="${t.date||today}"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      ${isEdit?`<button class="btn btn-red" onclick="deleteTransaction('${t.id}')">Excluir</button>`:""}
+      <button class="btn btn-green" onclick="saveTransaction(${isEdit?`'${t.id}'`:"null"})">
+        ${isEdit?"Salvar":"Registrar"}
+      </button>
+    </div>`;
+  document.getElementById("modal").style.display = "flex";
+
+  // Preenche opções de categoria
+  updateFinCatOptions(t.category);
+}
+
+function updateFinCatOptions(selectedCat) {
+  const type = document.getElementById("ft-type")?.value;
+  const sel  = document.getElementById("ft-cat");
+  if (!sel) return;
+  sel.innerHTML = Object.entries(FIN_CATEGORIES)
+    .filter(([,v])=>v.type===type)
+    .map(([k,v])=>`<option value="${k}" ${k===selectedCat?"selected":""}>${v.icon} ${v.label}</option>`)
+    .join("");
+}
+
+async function saveTransaction(id) {
+  const t = {
+    id:          id || Math.random().toString(36).slice(2,10),
+    type:        document.getElementById("ft-type")?.value,
+    category:    document.getElementById("ft-cat")?.value,
+    description: document.getElementById("ft-desc")?.value.trim(),
+    amount:      parseFloat(document.getElementById("ft-amount")?.value)||0,
+    date:        document.getElementById("ft-date")?.value,
+  };
+  if (!t.description) { alert("Preencha a descrição"); return; }
+  if (!t.amount || t.amount <= 0) { alert("Valor deve ser maior que zero"); return; }
+  if (!t.date) { alert("Selecione a data"); return; }
+  t.month = t.date.slice(0,7);
+
+  if (id) await api("PUT",  "/transactions/"+id, t);
+  else    await api("POST", "/transactions", t);
+
+  closeModal();
+  await loadTransactions(finMonth);
+}
+
+async function deleteTransaction(id) {
+  if (!confirm("Excluir este lançamento?")) return;
+  await api("DELETE", "/transactions/"+id);
+  closeModal();
+  await loadTransactions(finMonth);
+}
+
 
 function renderSync() {
   let html=`<div class="sync-info">
