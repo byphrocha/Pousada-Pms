@@ -3,10 +3,13 @@ const https   = require("https");
 const http    = require("http");
 const fs      = require("fs");
 const path    = require("path");
+const bcrypt  = require("bcryptjs");
+const jwt     = require("jsonwebtoken");
 const { createClient } = require("@supabase/supabase-js");
 
 const app  = express();
-const PORT = process.env.PORT || 3000;
+const PORT       = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "pousada-pms-secret-2024";
 
 // Supabase
 const supabase = createClient(
@@ -20,9 +23,109 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin",  "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
+});
+
+// ── Auth helpers ─────────────────────────────────────────────────────────────
+function authMiddleware(req, res, next) {
+  const token = (req.headers.authorization || "").split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Não autorizado" });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch { return res.status(401).json({ error: "Token inválido ou expirado" }); }
+}
+
+function adminOnly(req, res, next) {
+  if (req.user?.role !== "admin")
+    return res.status(403).json({ error: "Acesso restrito ao administrador" });
+  next();
+}
+
+// ── Login ─────────────────────────────────────────────────────────────────────
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password)
+    return res.status(400).json({ error: "Usuário e senha obrigatórios" });
+  const { data: user } = await supabase
+    .from("users").select("*").eq("username", username.toLowerCase()).single();
+  if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) return res.status(401).json({ error: "Senha incorreta" });
+  const token = jwt.sign(
+    { userId: user.id, role: user.role, username: user.username },
+    JWT_SECRET, { expiresIn: "30d" }
+  );
+  res.json({ token, role: user.role, username: user.username });
+});
+
+// ── Setup inicial (só funciona se não existir nenhum usuário) ─────────────────
+app.post("/setup-users", async (req, res) => {
+  const { data: existing } = await supabase.from("users").select("id").limit(1);
+  if (existing && existing.length > 0)
+    return res.status(403).json({ error: "Usuários já configurados" });
+  const { adminPass, staffPass } = req.body || {};
+  if (!adminPass || !staffPass)
+    return res.status(400).json({ error: "adminPass e staffPass obrigatórios" });
+  const genId = () => Math.random().toString(36).slice(2,10);
+  const adminHash = await bcrypt.hash(adminPass, 10);
+  const staffHash = await bcrypt.hash(staffPass, 10);
+  await supabase.from("users").insert([
+    { id: genId(), username: "admin",  password_hash: adminHash, role: "admin" },
+    { id: genId(), username: "staff",  password_hash: staffHash, role: "staff" },
+  ]);
+  res.json({ ok: true, message: "Usuários criados: admin e staff" });
+});
+
+// ── Mudar senha ───────────────────────────────────────────────────────────────
+app.post("/change-password", authMiddleware, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  const { data: user } = await supabase
+    .from("users").select("*").eq("id", req.user.userId).single();
+  if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+  const valid = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!valid) return res.status(401).json({ error: "Senha atual incorreta" });
+  const hash = await bcrypt.hash(newPassword, 10);
+  await supabase.from("users").update({ password_hash: hash }).eq("id", user.id);
+  res.json({ ok: true });
+});
+
+// ── Hóspedes ──────────────────────────────────────────────────────────────────
+app.get("/guests", authMiddleware, async (req, res) => {
+  const q = req.query.q || "";
+  let query = supabase.from("guests").select("*").order("name");
+  if (q.trim()) {
+    query = query.or(
+      `name.ilike.%${q}%,phone.ilike.%${q}%,cpf.ilike.%${q}%,email.ilike.%${q}%`
+    );
+  }
+  const { data, error } = await query.limit(50);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.get("/guests/:id", authMiddleware, async (req, res) => {
+  const { data } = await supabase.from("guests").select("*").eq("id", req.params.id).single();
+  res.json(data || null);
+});
+
+app.post("/guests", authMiddleware, async (req, res) => {
+  const g = req.body;
+  if (!g.id) g.id = Math.random().toString(36).slice(2,10);
+  g.updated_at = new Date().toISOString();
+  if (!g.created_at) g.created_at = new Date().toISOString();
+  const { data, error } = await supabase.from("guests").upsert(g).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.put("/guests/:id", authMiddleware, async (req, res) => {
+  const g = { ...req.body, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from("guests").update(g).eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // Utilitários iCal
@@ -76,13 +179,13 @@ function genId() { return Math.random().toString(36).slice(2, 10); }
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
 // ── Reservas ──────────────────────────────────────────────────────────────────
-app.get("/reservations", async (req, res) => {
+app.get("/reservations", authMiddleware, async (req, res) => {
   const { data, error } = await supabase.from("reservations").select("*").order("check_in");
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
 
-app.post("/reservations", async (req, res) => {
+app.post("/reservations", authMiddleware, async (req, res) => {
   const b = req.body;
   if (b.externalUid) {
     const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
@@ -108,7 +211,7 @@ app.post("/reservations", async (req, res) => {
   res.json({ ok: true, reservation: data });
 });
 
-app.put("/reservations/:id", async (req, res) => {
+app.put("/reservations/:id", authMiddleware, async (req, res) => {
   const b   = req.body;
   const row = {};
   if (b.roomId)     row.room_id    = b.roomId;
@@ -126,19 +229,19 @@ app.put("/reservations/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/reservations/:id", async (req, res) => {
+app.delete("/reservations/:id", authMiddleware, async (req, res) => {
   const { error } = await supabase.from("reservations").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
 // ── URLs iCal ─────────────────────────────────────────────────────────────────
-app.get("/urls", async (req, res) => {
+app.get("/urls", authMiddleware, adminOnly, async (req, res) => {
   const { data } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
   res.json(data?.value || { booking: {}, airbnb: {} });
 });
 
-app.post("/urls", async (req, res) => {
+app.post("/urls", authMiddleware, adminOnly, async (req, res) => {
   await supabase.from("settings").upsert({ key: "ical_urls", value: req.body });
   res.json({ ok: true });
 });
@@ -192,13 +295,13 @@ async function runSync() {
   return { log, added };
 }
 
-app.post("/sync", async (req, res) => {
+app.post("/sync", authMiddleware, adminOnly, async (req, res) => {
   const result = await runSync();
   res.json({ ok: true, ...result });
 });
 
 // ── Proxy iCal ────────────────────────────────────────────────────────────────
-app.get("/proxy-ical", async (req, res) => {
+app.get("/proxy-ical", authMiddleware, adminOnly, async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send("Parâmetro 'url' obrigatório");
   const allowed = ["airbnb.com", "booking.com", "ical.booking.com", "airbnb.com.br"];
@@ -211,7 +314,7 @@ app.get("/proxy-ical", async (req, res) => {
 });
 
 // ── Limpeza de bloqueios iCal ─────────────────────────────────────────────────
-app.post("/cleanup-blocked", async (req, res) => {
+app.post("/cleanup-blocked", authMiddleware, adminOnly, async (req, res) => {
   const BLOCKED = [
     "not available", "blocked", "bloqueado", "unavailable", "indispon",
     // NÃO inclui "closed" — no Booking.com pode ser reserva real
@@ -237,6 +340,12 @@ app.post("/cleanup-blocked", async (req, res) => {
 
   if (delErr) return res.status(500).json({ error: delErr.message });
   res.json({ ok: true, deleted: toDelete.length });
+});
+
+app.delete("/guests/:id", authMiddleware, async (req, res) => {
+  const { error } = await supabase.from("guests").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 // ── Arquivos estáticos (DEPOIS das rotas de API) ───────────────────────────────
