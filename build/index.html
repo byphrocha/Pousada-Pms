@@ -267,7 +267,18 @@ input,select,textarea{font-family:'DM Mono',monospace}
 </div>
 
 <script>
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Sanitização XSS ──────────────────────────────────────────────────────────
+// SEMPRE use esc() ao inserir dados do usuário em innerHTML
+function esc(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+
 const ROOMS = [
   {id:"10",type:"Triplo",climate:"AC",cap:3},
   {id:"11",type:"Triplo",climate:"Ventilador",cap:3},
@@ -376,6 +387,7 @@ async function doLogin() {
     hideLoginScreen();
     applyRole();
     await loadAll();
+    startAutoRefresh();
     render();
   } catch(e) { errEl.textContent = "Erro de conexão"; }
 }
@@ -450,6 +462,7 @@ async function doChangePassword() {
 
 function doLogout() {
   clearAuth();
+  stopAutoRefresh();
   closeModal();
   currentView = "map";
   showLoginScreen();
@@ -691,7 +704,7 @@ function renderMap() {
       <div>
         <div style="font-size:13px;font-weight:700;color:#3b82f6">Casa Fechada</div>
         <div style="font-size:11px;color:var(--mu);margin-top:2px">
-          ${cfAtiva.guestName} · ${fmtDate(cfAtiva.checkIn)} → ${fmtDate(cfAtiva.checkOut)}
+          ${esc(cfAtiva.guestName)} · ${fmtDate(cfAtiva.checkIn)} → ${fmtDate(cfAtiva.checkOut)}
         </div>
       </div>
       <span class="pill" style="background:#3b82f622;color:#3b82f6;margin-left:auto">CF</span>
@@ -729,7 +742,7 @@ function renderMap() {
           <div class="room-icon">${s.icon}</div>
           <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
           <div class="room-climate" style="color:${s.color}">💨 Vent.</div>
-          ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
+          ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(res.guestName)}</div>`:""}
           ${st==="checkin"?`<button class="clean-btn" style="background:#1e3a5f;color:#3b82f6;border-color:#3b82f644" onclick="markCheckedIn('${room.id}',event)">✓ Check-in</button>`:""}
           ${showClean?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
         </div>`;
@@ -783,7 +796,7 @@ function renderMap() {
         html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="handleRoomClick('${r.roomId}')">
           <span class="agenda-room" style="color:${clr}">${r.roomId}</span>
           <div>
-            <div style="color:var(--tx);font-size:13px;font-weight:600">${r.guestName}</div>
+            <div style="color:var(--tx);font-size:13px;font-weight:600">${esc(r.guestName)}</div>
             <div style="color:var(--mu);font-size:10px">${r.adults}ad${r.children>0?` + ${r.children}cr`:""}</div>
           </div>
         </div>`;
@@ -980,14 +993,14 @@ function resRow(r) {
     <div class="res-id" style="${isCasaToda?"border:1px solid #3b82f655;color:#3b82f6;font-size:13px;background:#0f1e2b":isSuite?"border:1px solid #f59e0b55;color:#f59e0b;font-size:13px":""}">${roomLabel}</div>
     <div style="flex:1;min-width:0">
       <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px">
-        ${r.guestName}
+        ${esc(r.guestName)}
         ${isCasaToda?`<span class="pill" style="background:#3b82f622;color:#3b82f6">🏡 CF</span>`:""}
         ${isSuite?`<span class="pill" style="background:#f59e0b22;color:#f59e0b">🔗 suíte</span>`:""}
       </div>
       <div style="font-size:11px;color:var(--mu);margin-top:3px">
         ${room?.type||""} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}
         · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>
-        ${r.phone?` · ${r.phone}`:""}
+        ${r.phone?` · ${esc(r.phone)}`:""}    
       </div>
     </div>
     <div style="display:flex;gap:7px;align-items:center;flex-shrink:0">
@@ -1041,16 +1054,16 @@ function renderHospedes() {
         👤
       </div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:14px">${g.name}</div>
+        <div style="font-weight:700;font-size:14px">${esc(g.name)}</div>
         <div style="font-size:11px;color:var(--mu);margin-top:3px">
-          ${g.phone ? "📞 "+g.phone : ""}
-          ${g.email ? " · ✉ "+g.email : ""}
-          ${g.cpf   ? " · 🪪 "+g.cpf  : ""}
+          ${g.phone ? "📞 "+esc(g.phone) : ""}
+          ${g.email ? " · ✉ "+esc(g.email) : ""}
+          ${g.cpf   ? " · 🪪 "+esc(g.cpf)  : ""}
         </div>
       </div>
       <div style="flex-shrink:0;text-align:right">
         <div style="font-size:12px;color:var(--dm);font-weight:600">${resCount} reserva${resCount!==1?"s":""}</div>
-        ${g.address?`<div style="font-size:10px;color:var(--mu);margin-top:2px">📍 ${g.address}</div>`:""}
+        ${g.address?`<div style="font-size:10px;color:var(--mu);margin-top:2px">📍 ${esc(g.address)}</div>`:""}
       </div>
       <span style="color:var(--bd);font-size:20px">›</span>
     </div>`;
@@ -1096,8 +1109,8 @@ function openGuestModal(guestId) {
       ${guestRes.slice(0,5).map(r=>`
         <div style="background:var(--bg0);border-radius:8px;padding:8px 12px;margin-bottom:6px;
           font-size:12px;display:flex;justify-content:space-between;align-items:center">
-          <span>Qto ${r.roomId} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</span>
-          <span style="color:var(--mu)">${r.source}</span>
+          <span>Qto ${esc(r.roomId)} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</span>
+          <span style="color:var(--mu)">${esc(r.source)}</span>
         </div>`).join("")}
     </div>` : ""}
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -1516,7 +1529,7 @@ function openCheckinModal(roomId) {
   document.getElementById("modal-body").innerHTML = `
     <div style="text-align:center;padding:16px 0">
       <div style="font-size:48px;margin-bottom:16px">🔓</div>
-      <div style="font-size:18px;font-weight:700;margin-bottom:6px">${res?.guestName||"Hóspede"}</div>
+      <div style="font-size:18px;font-weight:700;margin-bottom:6px">${esc(res?.guestName||"Hóspede")}</div>
       <div style="font-size:13px;color:var(--mu);margin-bottom:28px">
         Check-in previsto hoje · ${room?.type||""}
       </div>
@@ -1843,8 +1856,8 @@ function showGuestSuggestions(query) {
       onmouseout="this.style.background=''">
       <span style="font-size:16px">👤</span>
       <div>
-        <div style="font-size:13px;font-weight:600">${g.name}</div>
-        <div style="font-size:10px;color:var(--mu)">${g.phone||""}${g.phone&&g.email?" · ":""}${g.email||""}</div>
+        <div style="font-size:13px;font-weight:600">${esc(g.name)}</div>
+        <div style="font-size:10px;color:var(--mu)">${esc(g.phone||"")}${g.phone&&g.email?" · ":""}${esc(g.email||"")}</div>
       </div>
     </div>`).join("");
   box.style.display = "block";
@@ -1895,13 +1908,24 @@ async function autoSaveGuest(name, phone, email) {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 // Se já tem token salvo, tenta carregar direto; senão mostra login
+let autoRefreshInterval = null;
+
+function startAutoRefresh() {
+  if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+  autoRefreshInterval = setInterval(loadAll, 5 * 60 * 1000);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+}
 if (authToken) {
   applyRole();
   loadAll().catch(() => { clearAuth(); showLoginScreen(); });
+  startAutoRefresh();
 } else {
   showLoginScreen();
 }
-setInterval(loadAll, 5*60*1000);
+
 </script>
 </body>
 </html>
