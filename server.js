@@ -47,6 +47,14 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
+// ── Security headers ──────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
 // CORS — restringe ao domínio do Render
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://pousada-pms-209a.onrender.com";
 app.use((req, res, next) => {
@@ -96,23 +104,10 @@ app.post("/login", async (req, res) => {
   res.json({ token, role: user.role, username: user.username });
 });
 
-// ── Setup inicial (só funciona se não existir nenhum usuário) ─────────────────
-app.post("/setup-users", async (req, res) => {
-  const { data: existing } = await supabase.from("users").select("id").limit(1);
-  if (existing && existing.length > 0)
-    return res.status(403).json({ error: "Usuários já configurados" });
-  const { adminPass, staffPass } = req.body || {};
-  if (!adminPass || !staffPass)
-    return res.status(400).json({ error: "adminPass e staffPass obrigatórios" });
-  const genId = () => Math.random().toString(36).slice(2,10);
-  const adminHash = await bcrypt.hash(adminPass, 10);
-  const staffHash = await bcrypt.hash(staffPass, 10);
-  await supabase.from("users").insert([
-    { id: genId(), username: "admin",  password_hash: adminHash, role: "admin" },
-    { id: genId(), username: "staff",  password_hash: staffHash, role: "staff" },
-  ]);
-  res.json({ ok: true, message: "Usuários criados: admin e staff" });
-});
+// ── Setup inicial — DESABILITADO EM PRODUÇÃO ──────────────────────────────────
+// Para criar usuários pela primeira vez, descomente temporariamente esta rota,
+// faça POST /setup-users com { adminPass, staffPass }, depois comente de volta.
+// app.post("/setup-users", async (req, res) => { ... });
 
 // ── Mudar senha ───────────────────────────────────────────────────────────────
 app.post("/change-password", authMiddleware, async (req, res) => {
@@ -215,17 +210,20 @@ function parseIcal(text, source) {
   return events;
 }
 
-function fetchUrl(url) {
+function fetchUrl(url, depth = 0) {
+  if (depth > 3) return Promise.reject(new Error("Muitos redirecionamentos"));
   return new Promise((resolve, reject) => {
     const lib = url.startsWith("https") ? https : http;
     let body = "";
-    lib.get(url, { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
+    const req = lib.get(url, { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchUrl(res.headers.location).then(resolve).catch(reject);
+        return fetchUrl(res.headers.location, depth + 1).then(resolve).catch(reject);
       }
       res.on("data", d => body += d);
       res.on("end",  () => resolve(body));
     }).on("error", reject);
+    // Timeout de 15 segundos para não travar o auto-sync
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout ao buscar iCal")); });
   });
 }
 
@@ -242,27 +240,32 @@ app.get("/reservations", authMiddleware, async (req, res) => {
 });
 
 app.post("/reservations", authMiddleware, async (req, res) => {
-  const b = req.body;
+  const b = req.body || {};
+  // Valida campos obrigatórios
+  if (!b.guestName || !b.checkIn || !b.checkOut || !b.roomId)
+    return res.status(400).json({ error: "guestName, checkIn, checkOut e roomId são obrigatórios" });
+  if (b.checkOut <= b.checkIn)
+    return res.status(400).json({ error: "checkOut deve ser após checkIn" });
   if (b.externalUid) {
     const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
     if (exists) return res.json({ ok: false, reason: "duplicate" });
   }
   const row = {
     id:           b.id || genId(),
-    room_id:      b.roomId,
-    guest_name:   b.guestName,
+    room_id:      String(b.roomId).slice(0, 10),
+    guest_name:   String(b.guestName).slice(0, 200),
     check_in:     b.checkIn,
     check_out:    b.checkOut,
-    source:       b.source    || "direto",
-    adults:       b.adults    || 2,
-    children:     b.children  || 0,
-    phone:        b.phone     || "",
-    notes:        b.notes     || "",
-    status:       b.status    || "confirmed",
-    external_uid: b.externalUid || null,
-    created_at:   b.createdAt   || new Date().toISOString(),
-    amount:       b.amount      || 0,
-    payment:      b.payment     || "pix",
+    source:       ["direto","booking","airbnb"].includes(b.source) ? b.source : "direto",
+    adults:       Math.max(1, Math.min(40, parseInt(b.adults)  || 2)),
+    children:     Math.max(0, Math.min(20, parseInt(b.children)|| 0)),
+    phone:        String(b.phone  || "").slice(0, 30),
+    notes:        String(b.notes  || "").slice(0, 2000),
+    status:       ["confirmed","cancelled","pending"].includes(b.status) ? b.status : "confirmed",
+    external_uid: b.externalUid ? String(b.externalUid).slice(0, 300) : null,
+    created_at:   b.createdAt || new Date().toISOString(),
+    amount:       Math.max(0, parseFloat(b.amount) || 0),
+    payment:      ["pix","dinheiro","cartao","transferencia"].includes(b.payment) ? b.payment : "pix",
   };
   const { data, error } = await supabase.from("reservations").insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -270,20 +273,20 @@ app.post("/reservations", authMiddleware, async (req, res) => {
 });
 
 app.put("/reservations/:id", authMiddleware, async (req, res) => {
-  const b   = req.body;
+  const b   = req.body || {};
   const row = {};
-  if (b.roomId)     row.room_id    = b.roomId;
-  if (b.guestName)  row.guest_name = b.guestName;
-  if (b.checkIn)    row.check_in   = b.checkIn;
-  if (b.checkOut)   row.check_out  = b.checkOut;
-  if (b.source)     row.source     = b.source;
-  if (b.adults  !== undefined) row.adults   = b.adults;
-  if (b.children!== undefined) row.children = b.children;
-  if (b.phone   !== undefined) row.phone    = b.phone;
-  if (b.notes   !== undefined) row.notes    = b.notes;
-  if (b.amount  !== undefined) row.amount   = b.amount;
-  if (b.payment !== undefined) row.payment  = b.payment;
-  if (b.status)     row.status     = b.status;
+  if (b.roomId    !== undefined) row.room_id    = String(b.roomId).slice(0, 10);
+  if (b.guestName !== undefined) row.guest_name = String(b.guestName).slice(0, 200);
+  if (b.checkIn   !== undefined) row.check_in   = b.checkIn;
+  if (b.checkOut  !== undefined) row.check_out  = b.checkOut;
+  if (b.source    !== undefined) row.source     = ["direto","booking","airbnb"].includes(b.source) ? b.source : "direto";
+  if (b.adults    !== undefined) row.adults     = Math.max(1, Math.min(40, parseInt(b.adults)  || 2));
+  if (b.children  !== undefined) row.children   = Math.max(0, Math.min(20, parseInt(b.children)|| 0));
+  if (b.phone     !== undefined) row.phone      = String(b.phone  || "").slice(0, 30);
+  if (b.notes     !== undefined) row.notes      = String(b.notes  || "").slice(0, 2000);
+  if (b.amount    !== undefined) row.amount     = Math.max(0, parseFloat(b.amount) || 0);
+  if (b.payment   !== undefined) row.payment    = ["pix","dinheiro","cartao","transferencia"].includes(b.payment) ? b.payment : "pix";
+  if (b.status    !== undefined) row.status     = ["confirmed","cancelled","pending"].includes(b.status) ? b.status : "confirmed";
   const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -426,7 +429,7 @@ app.post("/room-states", authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/guests/:id", authMiddleware, async (req, res) => {
+app.delete("/guests/:id", authMiddleware, adminOnly, async (req, res) => {
   const { error } = await supabase.from("guests").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -444,18 +447,36 @@ app.get("/transactions", authMiddleware, adminOnly, async (req, res) => {
 });
 
 app.post("/transactions", authMiddleware, adminOnly, async (req, res) => {
-  const t = req.body;
-  if (!t.id)    t.id = Math.random().toString(36).slice(2,10);
-  if (!t.month) t.month = (t.date || "").slice(0,7);
-  t.created_at = new Date().toISOString();
+  const b = req.body || {};
+  const t = {
+    id:             b.id || Math.random().toString(36).slice(2,10),
+    type:           ["income","expense"].includes(b.type) ? b.type : "income",
+    category:       String(b.category || "outro_ingresso").slice(0, 50),
+    description:    String(b.description || "").slice(0, 500),
+    amount:         Math.max(0, parseFloat(b.amount) || 0),
+    date:           b.date || new Date().toISOString().split("T")[0],
+    month:          b.month || (b.date || "").slice(0,7),
+    reservation_id: b.reservation_id ? String(b.reservation_id).slice(0,20) : null,
+    created_at:     new Date().toISOString(),
+  };
+  if (!t.month) t.month = t.date.slice(0,7);
   const { data, error } = await supabase.from("transactions").insert(t).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
 
 app.put("/transactions/:id", authMiddleware, adminOnly, async (req, res) => {
-  const t = { ...req.body };
-  if (t.date) t.month = t.date.slice(0,7);
+  const b = req.body || {};
+  const t = {
+    type:        ["income","expense"].includes(b.type) ? b.type : undefined,
+    category:    b.category    ? String(b.category).slice(0,50)    : undefined,
+    description: b.description ? String(b.description).slice(0,500): undefined,
+    amount:      b.amount !== undefined ? Math.max(0, parseFloat(b.amount)||0) : undefined,
+    date:        b.date        || undefined,
+    month:       b.date        ? b.date.slice(0,7) : undefined,
+  };
+  // Remove undefined
+  Object.keys(t).forEach(k => t[k] === undefined && delete t[k]);
   const { data, error } = await supabase.from("transactions").update(t).eq("id", req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
