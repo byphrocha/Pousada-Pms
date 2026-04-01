@@ -128,11 +128,13 @@ app.post("/change-password", authMiddleware, async (req, res) => {
 
 // ── Hóspedes ──────────────────────────────────────────────────────────────────
 app.get("/guests", authMiddleware, async (req, res) => {
-  const q = req.query.q || "";
+  const q = (req.query.q || "").slice(0, 100); // limite de tamanho
   let query = supabase.from("guests").select("*").order("name");
   if (q.trim()) {
+    // Escapa % e _ para evitar wildcard abuse no ilike
+    const safe = q.replace(/[%_\\]/g, c => "\\" + c);
     query = query.or(
-      `name.ilike.%${q}%,phone.ilike.%${q}%,cpf.ilike.%${q}%,email.ilike.%${q}%`
+      `name.ilike.%${safe}%,phone.ilike.%${safe}%,cpf.ilike.%${safe}%,email.ilike.%${safe}%`
     );
   }
   const { data, error } = await query.limit(50);
@@ -367,8 +369,14 @@ app.post("/sync", authMiddleware, adminOnly, async (req, res) => {
 app.get("/proxy-ical", authMiddleware, adminOnly, async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send("Parâmetro 'url' obrigatório");
-  const allowed = ["airbnb.com", "booking.com", "ical.booking.com", "airbnb.com.br"];
-  if (!allowed.some(d => url.includes(d))) return res.status(403).send("Domínio não permitido");
+  // Valida domínio via parse de URL — evita bypass com evil.com?x=airbnb.com
+  const ALLOWED_HOSTS = ["airbnb.com", "www.airbnb.com", "www.airbnb.com.br",
+                         "booking.com", "ical.booking.com", "www.booking.com"];
+  let parsed;
+  try { parsed = new URL(url); } catch { return res.status(400).send("URL inválida"); }
+  if (!ALLOWED_HOSTS.some(h => parsed.hostname === h || parsed.hostname.endsWith("."+h)))
+    return res.status(403).send("Domínio não permitido");
+  if (parsed.protocol !== "https:") return res.status(403).send("Apenas HTTPS permitido");
   try {
     const text = await fetchUrl(url);
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
@@ -422,9 +430,15 @@ app.get("/room-states", authMiddleware, async (req, res) => {
 app.post("/room-states", authMiddleware, async (req, res) => {
   const today = todayBrasilia();
   const { cleaned, checkedIn } = req.body || {};
+  const VALID_ROOMS = ["10","11","12","20","21","22","23","24","25"];
+  // Valida que são arrays e contêm apenas IDs de quartos conhecidos
+  const safeClean = Array.isArray(cleaned)
+    ? cleaned.filter(r => VALID_ROOMS.includes(String(r))) : [];
+  const safeCheckedIn = Array.isArray(checkedIn)
+    ? checkedIn.filter(r => VALID_ROOMS.includes(String(r))) : [];
   await supabase.from("settings").upsert({
     key: "room_states_"+today,
-    value: { cleaned: cleaned||[], checkedIn: checkedIn||[] }
+    value: { cleaned: safeClean, checkedIn: safeCheckedIn }
   });
   res.json({ ok: true });
 });
