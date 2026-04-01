@@ -284,7 +284,10 @@ const ROOMS = [
 const SUITES = [
   { id:"11+12", label:"Suíte 11+12", rooms:["11","12"], type:"Triplo ×2 (Ventilador)", cap:6 }
 ];
-const todayStr  = () => new Date().toISOString().split("T")[0];
+const todayStr  = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+};
 const fmtDate   = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR") : "—";
 const fmtMonth  = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"}) : "";
 const genId     = () => Math.random().toString(36).slice(2,10);
@@ -296,7 +299,7 @@ let reservations = [];
 let guests        = [];
 let guestSearch   = "";
 let transactions  = [];
-let finMonth      = new Date().toISOString().slice(0,7); // YYYY-MM
+let finMonth      = todayStr().slice(0,7); // YYYY-MM
 let currentView  = "map";
 let syncLog      = [];
 let icalUrls     = {booking:{},airbnb:{}};
@@ -1608,7 +1611,15 @@ function reservationForm(r, isEdit) {
       </select></div>
   </div>
   <div class="field"><label>Nome do Hóspede</label>
-    <input id="f-guestName" value="${r.guestName||""}" placeholder="Nome completo" autofocus></div>
+    <div style="position:relative">
+      <input id="f-guestName" value="${r.guestName||""}" placeholder="Nome completo" autofocus
+        autocomplete="off"
+        oninput="showGuestSuggestions(this.value)"
+        onblur="setTimeout(()=>hideGuestSuggestions(),200)">
+      <div id="guest-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;
+        background:var(--bg1);border:1px solid var(--bl);border-radius:0 0 10px 10px;z-index:999;
+        max-height:180px;overflow-y:auto;box-shadow:0 8px 24px #0006"></div>
+    </div></div>
   <div class="row2">
     <div class="field"><label>Check-in</label>
       <input type="date" id="f-checkIn"  value="${r.checkIn||""}"></div>
@@ -1759,8 +1770,10 @@ async function submitForm(id) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
 
-  // Auto-save hóspede (cria se não existir, atualiza telefone se mudou)
-  await autoSaveGuest(form.guestName, get("f-phone"), get("f-email"));
+  // Auto-save hóspede apenas para reservas diretas (não iCal)
+  if (form.source === "direto") {
+    await autoSaveGuest(form.guestName, get("f-phone"), get("f-email"));
+  }
 
   // Cria transação financeira para reservas diretas (não booking/airbnb)
   if (form.amount > 0 && form.source === "direto" && !id) {
@@ -1809,8 +1822,52 @@ async function submitForm(id) {
 }
 
 // ─── Auto-save hóspede ────────────────────────────────────────────────────────
+const GENERIC_NAMES = /^(reserved|blocked|closed|not available|unavailable|bloqueado|airbnb|booking)/i;
+
+// ─── Autocomplete hóspede ─────────────────────────────────────────────────────
+function showGuestSuggestions(query) {
+  const box = document.getElementById("guest-suggestions");
+  if (!box) return;
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) { box.style.display="none"; return; }
+  const matches = guests.filter(g =>
+    g.name.toLowerCase().includes(q) ||
+    (g.phone||"").includes(q)
+  ).slice(0, 6);
+  if (!matches.length) { box.style.display="none"; return; }
+  box.innerHTML = matches.map(g => `
+    <div onmousedown="fillGuestFromSuggestion('${g.id}')"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--bd);
+      display:flex;align-items:center;gap:10px"
+      onmouseover="this.style.background='var(--bg3)'"
+      onmouseout="this.style.background=''">
+      <span style="font-size:16px">👤</span>
+      <div>
+        <div style="font-size:13px;font-weight:600">${g.name}</div>
+        <div style="font-size:10px;color:var(--mu)">${g.phone||""}${g.phone&&g.email?" · ":""}${g.email||""}</div>
+      </div>
+    </div>`).join("");
+  box.style.display = "block";
+}
+
+function hideGuestSuggestions() {
+  const box = document.getElementById("guest-suggestions");
+  if (box) box.style.display = "none";
+}
+
+function fillGuestFromSuggestion(guestId) {
+  const g = guests.find(x => x.id === guestId);
+  if (!g) return;
+  const nameEl  = document.getElementById("f-guestName");
+  const phoneEl = document.getElementById("f-phone");
+  const emailEl = document.getElementById("f-email");
+  if (nameEl)  nameEl.value  = g.name;
+  if (phoneEl) phoneEl.value = g.phone  || "";
+  if (emailEl) emailEl.value = g.email  || "";
+  hideGuestSuggestions();
+}
 async function autoSaveGuest(name, phone, email) {
-  if (!name) return;
+  if (!name || GENERIC_NAMES.test(name.trim())) return;
   // Procura por nome exato ou telefone
   const existing = guests.find(g =>
     g.name === name || (phone && g.phone === phone)
