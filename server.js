@@ -1,6 +1,6 @@
 const express = require("express");
 const https   = require("https");
-const http    = require("http");
+const dns     = require("dns").promises;
 const fs      = require("fs");
 const path    = require("path");
 const bcrypt  = require("bcryptjs");
@@ -10,6 +10,7 @@ const { createClient } = require("@supabase/supabase-js");
 const app  = express();
 const PORT       = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
+const MAX_ICAL_BYTES = 2 * 1024 * 1024; // 2MB por feed
 if (!JWT_SECRET) {
   console.error("❌ FATAL: variável JWT_SECRET não definida. Configure no Render → Environment.");
   process.exit(1);
@@ -73,7 +74,7 @@ function authMiddleware(req, res, next) {
   const token = (req.headers.authorization || "").split(" ")[1];
   if (!token) return res.status(401).json({ error: "Não autorizado" });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    req.user = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
     next();
   } catch { return res.status(401).json({ error: "Token inválido ou expirado" }); }
 }
@@ -86,7 +87,8 @@ function adminOnly(req, res, next) {
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 app.post("/login", async (req, res) => {
-  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+  const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+  const ip = String(rawIp).split(",")[0].trim();
   if (!checkLoginRate(ip))
     return res.status(429).json({ error: "Muitas tentativas. Aguarde 15 minutos." });
   const { username, password } = req.body || {};
@@ -99,7 +101,7 @@ app.post("/login", async (req, res) => {
   if (!valid) return res.status(401).json({ error: "Credenciais inválidas" });
   const token = jwt.sign(
     { userId: user.id, role: user.role, username: user.username },
-    JWT_SECRET, { expiresIn: "30d" }
+    JWT_SECRET, { expiresIn: "30d", algorithm: "HS256" }
   );
   res.json({ token, role: user.role, username: user.username });
 });
@@ -212,20 +214,82 @@ function parseIcal(text, source) {
   return events;
 }
 
-function fetchUrl(url, depth = 0) {
+function isAllowedHostname(url, allowedHosts) {
+  if (!allowedHosts || allowedHosts.length === 0) return true;
+  return allowedHosts.some(h => url.hostname === h || url.hostname.endsWith("." + h));
+}
+
+function isPrivateIp(ip) {
+  const h = String(ip || "").toLowerCase();
+  if (!h) return true;
+  if (h === "localhost" || h === "::1" || h === "0.0.0.0") return true;
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return true;
+  if (/^::ffff:(127|10|192\.168|169\.254|172\.(1[6-9]|2\d|3[0-1]))\./.test(h)) return true;
+  if (/^fc|^fd/.test(h)) return true; // ULA
+  if (/^fe8|^fe9|^fea|^feb/.test(h)) return true; // link-local IPv6
+  return false;
+}
+
+async function assertPublicDns(hostname) {
+  const results = await dns.lookup(hostname, { all: true, verbatim: true });
+  if (!results || results.length === 0) throw new Error("Hostname sem resolução DNS");
+  if (results.some((r) => isPrivateIp(r.address)))
+    throw new Error("Destino resolve para IP privado/interno");
+}
+
+async function fetchUrl(url, depth = 0, allowedHosts = null) {
   if (depth > 3) return Promise.reject(new Error("Muitos redirecionamentos"));
+  let parsed;
+  try { parsed = new URL(url); } catch { return Promise.reject(new Error("URL inválida")); }
+  if (parsed.protocol !== "https:") return Promise.reject(new Error("Apenas HTTPS permitido"));
+  if (parsed.username || parsed.password)
+    return Promise.reject(new Error("URL com credenciais não é permitida"));
+  if (isPrivateIp(parsed.hostname))
+    return Promise.reject(new Error("Destino privado/interno não permitido"));
+  if (!isAllowedHostname(parsed, allowedHosts))
+    return Promise.reject(new Error("Domínio não permitido"));
+  await assertPublicDns(parsed.hostname);
+
   return new Promise((resolve, reject) => {
-    const lib = url.startsWith("https") ? https : http;
+    let done = false;
+    const fail = (err) => {
+      if (done) return;
+      done = true;
+      reject(err);
+    };
+    const ok = (body) => {
+      if (done) return;
+      done = true;
+      resolve(body);
+    };
+
+    const lib = https;
     let body = "";
-    const req = lib.get(url, { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
+    let size = 0;
+    const req = lib.get(parsed.toString(), { headers: { "User-Agent": "Mozilla/5.0 (PMS-Pousada/1.0)" } }, (res) => {
+      if (res.statusCode >= 400) return fail(new Error(`HTTP ${res.statusCode}`));
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchUrl(res.headers.location, depth + 1).then(resolve).catch(reject);
+        const nextUrl = new URL(res.headers.location, parsed).toString();
+        return fetchUrl(nextUrl, depth + 1, allowedHosts).then(ok).catch(fail);
       }
-      res.on("data", d => body += d);
-      res.on("end",  () => resolve(body));
-    }).on("error", reject);
+      if (res.statusCode < 200 || res.statusCode >= 300)
+        return fail(new Error(`HTTP ${res.statusCode}`));
+      res.on("data", (d) => {
+        size += Buffer.byteLength(d);
+        if (size > MAX_ICAL_BYTES) {
+          req.destroy(new Error("Arquivo iCal excede limite de tamanho"));
+          return;
+        }
+        body += d;
+      });
+      res.on("end",  () => ok(body));
+    }).on("error", fail);
     // Timeout de 15 segundos para não travar o auto-sync
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout ao buscar iCal")); });
+    req.setTimeout(15000, () => req.destroy(new Error("Timeout ao buscar iCal")));
   });
 }
 
@@ -378,7 +442,7 @@ app.get("/proxy-ical", authMiddleware, adminOnly, async (req, res) => {
     return res.status(403).send("Domínio não permitido");
   if (parsed.protocol !== "https:") return res.status(403).send("Apenas HTTPS permitido");
   try {
-    const text = await fetchUrl(url);
+    const text = await fetchUrl(url, 0, ALLOWED_HOSTS);
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
     res.send(text);
   } catch(e) { res.status(500).send("Erro: " + e.message); }
