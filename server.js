@@ -9,9 +9,17 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "pousada-pms-secret-2024";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("❌ FATAL: variável JWT_SECRET não definida. Configure no Render → Environment.");
+  process.exit(1);
+}
 
 // Supabase
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+  console.error("❌ FATAL: SUPABASE_URL e SUPABASE_KEY devem estar definidos.");
+  process.exit(1);
+}
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -19,9 +27,33 @@ const supabase = createClient(
 
 app.use(express.json());
 
-// CORS — antes de qualquer rota
+// ── Rate limiting simples para /login ─────────────────────────────────────────
+const loginAttempts = new Map();
+function checkLoginRate(ip) {
+  const now  = Date.now();
+  const list = (loginAttempts.get(ip) || []).filter(t => now - t < 15 * 60 * 1000);
+  if (list.length >= 10) return false; // 10 tentativas por 15 min
+  list.push(now);
+  loginAttempts.set(ip, list);
+  return true;
+}
+// Limpa entradas antigas a cada 30 min para não vazar memória
+setInterval(() => {
+  const cut = Date.now() - 15 * 60 * 1000;
+  for (const [ip, times] of loginAttempts) {
+    const fresh = times.filter(t => t > cut);
+    if (fresh.length === 0) loginAttempts.delete(ip);
+    else loginAttempts.set(ip, fresh);
+  }
+}, 30 * 60 * 1000);
+
+// CORS — restringe ao domínio do Render
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://pousada-pms-209a.onrender.com";
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin",  "*");
+  const origin = req.headers.origin;
+  if (!origin || origin === ALLOWED_ORIGIN) {
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
@@ -46,6 +78,9 @@ function adminOnly(req, res, next) {
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 app.post("/login", async (req, res) => {
+  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+  if (!checkLoginRate(ip))
+    return res.status(429).json({ error: "Muitas tentativas. Aguarde 15 minutos." });
   const { username, password } = req.body || {};
   if (!username || !password)
     return res.status(400).json({ error: "Usuário e senha obrigatórios" });
