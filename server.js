@@ -25,7 +25,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "256kb" })); // previne DoS via payload gigante
 
 // ── Rate limiting simples para /login ─────────────────────────────────────────
 const loginAttempts = new Map();
@@ -86,9 +86,9 @@ app.post("/login", async (req, res) => {
     return res.status(400).json({ error: "Usuário e senha obrigatórios" });
   const { data: user } = await supabase
     .from("users").select("*").eq("username", username.toLowerCase()).single();
-  if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
+  if (!user) return res.status(401).json({ error: "Credenciais inválidas" });
   const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) return res.status(401).json({ error: "Senha incorreta" });
+  if (!valid) return res.status(401).json({ error: "Credenciais inválidas" });
   const token = jwt.sign(
     { userId: user.id, role: user.role, username: user.username },
     JWT_SECRET, { expiresIn: "30d" }
@@ -117,6 +117,10 @@ app.post("/setup-users", async (req, res) => {
 // ── Mudar senha ───────────────────────────────────────────────────────────────
 app.post("/change-password", authMiddleware, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword)
+    return res.status(400).json({ error: "Campos obrigatórios" });
+  if (newPassword.length < 6)
+    return res.status(400).json({ error: "Nova senha deve ter ao menos 6 caracteres" });
   const { data: user } = await supabase
     .from("users").select("*").eq("id", req.user.userId).single();
   if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
@@ -147,9 +151,17 @@ app.get("/guests/:id", authMiddleware, async (req, res) => {
 });
 
 app.post("/guests", authMiddleware, async (req, res) => {
-  const g = req.body;
-  if (!g.id) g.id = Math.random().toString(36).slice(2,10);
-  g.updated_at = new Date().toISOString();
+  const b = req.body || {};
+  const g = {
+    id:         b.id || Math.random().toString(36).slice(2,10),
+    name:       (b.name    || "").slice(0, 200),
+    phone:      (b.phone   || "").slice(0, 30),
+    email:      (b.email   || "").slice(0, 200),
+    cpf:        (b.cpf     || "").slice(0, 20),
+    address:    (b.address || "").slice(0, 300),
+    notes:      (b.notes   || "").slice(0, 1000),
+    updated_at: new Date().toISOString(),
+  };
   if (!g.created_at) g.created_at = new Date().toISOString();
   const { data, error } = await supabase.from("guests").upsert(g).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -157,7 +169,16 @@ app.post("/guests", authMiddleware, async (req, res) => {
 });
 
 app.put("/guests/:id", authMiddleware, async (req, res) => {
-  const g = { ...req.body, updated_at: new Date().toISOString() };
+  const b = req.body || {};
+  const g = {
+    name:       (b.name    || "").slice(0, 200),
+    phone:      (b.phone   || "").slice(0, 30),
+    email:      (b.email   || "").slice(0, 200),
+    cpf:        (b.cpf     || "").slice(0, 20),
+    address:    (b.address || "").slice(0, 300),
+    notes:      (b.notes   || "").slice(0, 1000),
+    updated_at: new Date().toISOString(),
+  };
   const { data, error } = await supabase.from("guests").update(g).eq("id", req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
@@ -268,7 +289,7 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/reservations/:id", authMiddleware, async (req, res) => {
+app.delete("/reservations/:id", authMiddleware, adminOnly, async (req, res) => {
   const { error } = await supabase.from("reservations").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -382,15 +403,21 @@ app.post("/cleanup-blocked", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ── Estados de quarto (limpeza / check-in) ────────────────────────────────────
+function todayBrasilia() {
+  // UTC-3 fixo (Brasília/Londrina não usa horário de verão desde 2019)
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  return d.toISOString().split("T")[0];
+}
+
 app.get("/room-states", authMiddleware, async (req, res) => {
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayBrasilia();
   const { data } = await supabase.from("settings")
     .select("value").eq("key", "room_states_"+today).single();
   res.json(data?.value || { cleaned: [], checkedIn: [] });
 });
 
 app.post("/room-states", authMiddleware, async (req, res) => {
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayBrasilia();
   const { cleaned, checkedIn } = req.body || {};
   await supabase.from("settings").upsert({
     key: "room_states_"+today,
