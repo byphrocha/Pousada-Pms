@@ -1027,7 +1027,7 @@ function renderHospedes() {
 
   let html = `
   <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
-    <input id="guest-search-input" value="${guestSearch}"
+    <input id="guest-search-input" value="${esc(guestSearch)}"
       placeholder="🔍 Buscar por nome, telefone, CPF ou e-mail..."
       style="flex:1;min-width:200px;background:var(--bg1);border:1px solid var(--bd);border-radius:10px;
       padding:10px 14px;color:var(--tx);font-size:13px;outline:none"
@@ -1086,18 +1086,18 @@ function openGuestModal(guestId) {
   document.getElementById("modal-body").innerHTML = `
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
       <div class="field"><label>Nome *</label>
-        <input id="g-name" value="${g.name||""}" placeholder="Nome completo"></div>
+        <input id="g-name" value="${esc(g.name||"")}" placeholder="Nome completo"></div>
       <div class="row2">
         <div class="field"><label>Telefone / WhatsApp</label>
-          <input id="g-phone" value="${g.phone||""}" placeholder="(44) 99999-9999"></div>
+          <input id="g-phone" value="${esc(g.phone||"")}" placeholder="(44) 99999-9999"></div>
         <div class="field"><label>E-mail</label>
-          <input id="g-email" value="${g.email||""}" placeholder="email@exemplo.com"></div>
+          <input id="g-email" value="${esc(g.email||"")}" placeholder="email@exemplo.com"></div>
       </div>
       <div class="row2">
         <div class="field"><label>CPF / Documento</label>
-          <input id="g-cpf" value="${g.cpf||""}" placeholder="000.000.000-00"></div>
+          <input id="g-cpf" value="${esc(g.cpf||"")}" placeholder="000.000.000-00"></div>
         <div class="field"><label>Endereço / Cidade</label>
-          <input id="g-address" value="${g.address||""}" placeholder="Cidade, Estado"></div>
+          <input id="g-address" value="${esc(g.address||"")}" placeholder="Cidade, Estado"></div>
       </div>
       <div class="field"><label>Observações</label>
         <textarea id="g-notes">${g.notes||""}</textarea></div>
@@ -1321,12 +1321,12 @@ function openTransactionModal(id) {
           <select id="ft-cat"></select></div>
       </div>
       <div class="field"><label>Descrição</label>
-        <input id="ft-desc" value="${t.description||""}" placeholder="Ex: Conta de luz de março"></div>
+        <input id="ft-desc" value="${esc(t.description||"")}" placeholder="Ex: Conta de luz de março"></div>
       <div class="row2">
         <div class="field"><label>Valor (R$)</label>
-          <input type="number" id="ft-amount" value="${t.amount||""}" min="0" step="0.01" placeholder="0,00"></div>
+          <input type="number" id="ft-amount" value="${esc(t.amount||"")}" min="0" step="0.01" placeholder="0,00"></div>
         <div class="field"><label>Data</label>
-          <input type="date" id="ft-date" value="${t.date||today}"></div>
+          <input type="date" id="ft-date" value="${esc(t.date||today)}"></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -1400,7 +1400,7 @@ function renderSync() {
         background:#0f1e2b;border-radius:6px;padding:4px 2px;border:1px solid #3b82f644">CF</div>
       <input style="flex:1;background:var(--bg0);border:1px solid ${cfUrl?"#3b82f655":"var(--bd)"};border-radius:8px;
         color:${cfUrl?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
-        value="${cfUrl}" placeholder="URL iCal do anúncio da pousada toda (Airbnb)"
+        value="${esc(cfUrl)}" placeholder="URL iCal do anúncio da pousada toda (Airbnb)"
         oninput="setIcalUrl('airbnb','CF',this.value)">
     </div>
     <div style="font-size:10px;color:var(--mu);margin-top:6px;padding-left:52px">
@@ -1428,7 +1428,7 @@ function renderSync() {
             background:#2b1e0a;border-radius:6px;padding:4px 2px;border:1px solid #f59e0b44">11+12</div>
           <input style="flex:1;background:var(--bg0);border:1px solid ${val?"#f59e0b55":"var(--bd)"};border-radius:8px;
             color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
-            value="${val}" placeholder="URL iCal única do anúncio Suíte 11+12 no Airbnb"
+            value="${esc(val)}" placeholder="URL iCal única do anúncio Suíte 11+12 no Airbnb"
             oninput="setIcalUrl('airbnb','11+12',this.value)">
         </div>
         <div style="font-size:10px;color:var(--mu);margin-top:4px;padding-left:52px">
@@ -1445,7 +1445,7 @@ function renderSync() {
         <div style="width:32px;color:var(--bl);font-weight:800;font-size:14px;text-align:center">${r.id}</div>
         <input style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
           color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
-          value="${val}" placeholder="URL iCal — Qto ${r.id} (${r.type})"
+          value="${esc(val)}" placeholder="URL iCal — Qto ${r.id} (${r.type})"
           oninput="setIcalUrl('${src}','${r.id}',this.value)">
       </div>`;
     });
@@ -1626,7 +1626,7 @@ function reservationForm(r, isEdit) {
   </div>
   <div class="field"><label>Nome do Hóspede</label>
     <div style="position:relative">
-      <input id="f-guestName" value="${r.guestName||""}" placeholder="Nome completo" autofocus
+      <input id="f-guestName" value="${esc(r.guestName||"")}" placeholder="Nome completo" autofocus
         autocomplete="off"
         oninput="showGuestSuggestions(this.value)"
         onblur="setTimeout(()=>hideGuestSuggestions(),200)">
@@ -1648,13 +1648,13 @@ function reservationForm(r, isEdit) {
   </div>
   <div class="row2">
     <div class="field"><label>Telefone / WhatsApp</label>
-      <input id="f-phone" value="${r.phone||""}" placeholder="(44) 99999-9999"></div>
+      <input id="f-phone" value="${esc(r.phone||"")}" placeholder="(44) 99999-9999"></div>
     <div class="field"><label>E-mail</label>
-      <input id="f-email" value="${r.email||""}" placeholder="email@exemplo.com"></div>
+      <input id="f-email" value="${esc(r.email||"")}" placeholder="email@exemplo.com"></div>
   </div>
   <div class="row2">
     <div class="field"><label>Valor Total (R$)</label>
-      <input type="number" id="f-amount" value="${r.amount||""}" min="0" step="0.01" placeholder="0,00"></div>
+      <input type="number" id="f-amount" value="${esc(r.amount||"")}" min="0" step="0.01" placeholder="0,00"></div>
     <div class="field"><label>Forma de Pagamento</label>
       <select id="f-payment">
         <option value="pix"         ${(r.payment||"pix")==="pix"        ?"selected":""}>PIX</option>
