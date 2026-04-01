@@ -555,6 +555,7 @@ async function saveReservation(form) {
 }
 
 async function cancelReservation(id) {
+  if (!confirm("Cancelar esta reserva? Esta ação não pode ser desfeita.")) return;
   await api("PUT",`/reservations/${id}`, {status:"cancelled"});
   await loadAll();
   closeModal();
@@ -838,7 +839,7 @@ function renderReservas() {
 
   let html=`
   <div class="filter-bar">
-    <input id="search-inp" placeholder="🔍 Buscar hóspede ou quarto..." value="${searchQ}"
+    <input id="search-inp" placeholder="🔍 Buscar hóspede ou quarto..." value="${esc(searchQ)}"
       oninput="searchQ=this.value;render()">
     <div style="display:flex;gap:6px;flex-wrap:wrap">`;
 
@@ -862,9 +863,9 @@ function renderReservas() {
 
   <div class="date-filter">
     <label>De</label>
-    <input type="date" value="${dateFrom}" onchange="dateFrom=this.value;render()">
+    <input type="date" value="${esc(dateFrom)}" onchange="dateFrom=this.value;render()">
     <label>Até</label>
-    <input type="date" value="${dateTo}"   onchange="dateTo=this.value;render()">
+    <input type="date" value="${esc(dateTo)}"   onchange="dateTo=this.value;render()">
     ${dateFrom||dateTo?`<button class="clear-btn" onclick="dateFrom='';dateTo='';render()">✕ Limpar datas</button>`:""}
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <span style="font-size:10px;color:var(--mu)">Agrupar por mês</span>
