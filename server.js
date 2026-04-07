@@ -698,6 +698,163 @@ app.delete("/prereservations/:id", authMiddleware, adminOnly, async (req, res) =
   res.json({ ok: true });
 });
 
+// ── Exportação iCal do PMS (para colar no Booking e Airbnb) ──────────────────
+// Rota PÚBLICA — Booking/Airbnb buscam sem autenticação
+// Segurança via token secreto na URL: /calendar/:token/:roomId.ics
+app.get("/calendar/:token/:roomId.ics", async (req, res) => {
+  const CALENDAR_TOKEN = process.env.CALENDAR_TOKEN || "";
+  if (!CALENDAR_TOKEN || req.params.token !== CALENDAR_TOKEN) {
+    return res.status(403).send("Acesso negado");
+  }
+
+  const roomId = req.params.roomId;
+  const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25","CF","11+12"];
+  if (!ALL_ROOMS.includes(roomId)) {
+    return res.status(404).send("Quarto não encontrado");
+  }
+
+  try {
+    let query = supabase
+      .from("reservations")
+      .select("id, room_id, guest_name, check_in, check_out, external_uid")
+      .eq("status", "confirmed");
+
+    if (roomId === "11+12") {
+      query = query.in("room_id", ["11","12"]);
+    } else if (roomId !== "CF") {
+      query = query.eq("room_id", roomId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const now = new Date().toISOString().replace(/[-:.]/g,"").slice(0,15) + "Z";
+
+    let cal = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      `PRODID:-//PMS Pousada//Room ${roomId}//PT`,
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      `X-WR-CALNAME:Pousada - Quarto ${roomId}`,
+      "X-WR-TIMEZONE:America/Sao_Paulo",
+    ];
+
+    const seen = new Set();
+    for (const r of (data || [])) {
+      // Deduplica para CF e 11+12
+      const key = `${r.check_in}|${r.check_out}|${r.guest_name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const uid  = r.external_uid ? `pms-${r.external_uid}@pousada` : `pms-${r.id}@pousada`;
+      const dtstart = r.check_in.replace(/-/g,"");
+      const dtend   = r.check_out.replace(/-/g,"");
+      // Anonimiza parcialmente — não vaza nome completo
+      const name = r.guest_name
+        ? r.guest_name.split(" ")[0] + " (reservado)"
+        : "Reservado";
+
+      cal.push(
+        "BEGIN:VEVENT",
+        `UID:${uid}`,
+        `DTSTAMP:${now}`,
+        `DTSTART;VALUE=DATE:${dtstart}`,
+        `DTEND;VALUE=DATE:${dtend}`,
+        `SUMMARY:${name}`,
+        "DESCRIPTION:Reserva via PMS Pousada",
+        "STATUS:CONFIRMED",
+        "END:VEVENT"
+      );
+    }
+
+    cal.push("END:VCALENDAR");
+
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="quarto-${roomId}.ics"`);
+    res.setHeader("Cache-Control", "no-cache, no-store");
+    res.send(cal.join("\r\n"));
+  } catch(e) {
+    res.status(500).send("Erro: " + e.message);
+  }
+});
+
+// Lista todas as URLs de calendário (admin)
+app.get("/calendar-urls", authMiddleware, adminOnly, async (req, res) => {
+  const token = process.env.CALENDAR_TOKEN || "";
+  if (!token) return res.status(503).json({ error: "CALENDAR_TOKEN não definido. Adicione nas variáveis de ambiente do Render." });
+  const base  = process.env.ALLOWED_ORIGIN || "https://pousada-pms-209a.onrender.com";
+  const rooms = ["10","11","12","20","21","22","23","24","25","11+12","CF"];
+  const urls  = Object.fromEntries(rooms.map(r => [r, `${base}/calendar/${token}/${r}.ics`]));
+  res.json({ urls });
+});
+
+
+// ── Exportação iCal (para colar no Booking e Airbnb) ─────────────────────────
+// URL: /calendar/QUARTO.ics  ex: /calendar/24.ics  /calendar/all.ics
+// Protegido por token opcional: ?token=ICAL_TOKEN
+const ICAL_TOKEN = process.env.ICAL_TOKEN || null;
+
+app.get("/calendar/:roomId.ics", async (req, res) => {
+  if (ICAL_TOKEN && req.query.token !== ICAL_TOKEN)
+    return res.status(401).send("Unauthorized");
+
+  const roomId  = req.params.roomId;
+  const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
+  if (!ALL_ROOMS.includes(roomId) && roomId !== "all")
+    return res.status(404).send("Quarto não encontrado");
+
+  try {
+    let query = supabase
+      .from("reservations")
+      .select("id, room_id, guest_name, check_in, check_out, status, source")
+      .neq("status", "cancelled")
+      .order("check_in");
+    if (roomId !== "all") query = query.eq("room_id", roomId);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).send("Erro ao buscar reservas");
+
+    const now  = new Date().toISOString().replace(/[-:.]/g,"").slice(0,15) + "Z";
+    const host = req.headers.host || "pousada-pms-209a.onrender.com";
+
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      `PRODID:-//Pousada PMS//Quarto ${roomId}//PT`,
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      `X-WR-CALNAME:Pousada - Quarto ${roomId === "all" ? "Todos" : roomId}`,
+      "X-WR-TIMEZONE:America/Sao_Paulo",
+    ];
+
+    for (const r of (data || [])) {
+      const dtStart = r.check_in.replace(/-/g, "");
+      const dtEnd   = r.check_out.replace(/-/g, "");
+      // Não expõe nome do hóspede — apenas bloqueia a data
+      const summary = `Reservado`;
+      lines.push(
+        "BEGIN:VEVENT",
+        `UID:pms-${r.id}@${host}`,
+        `DTSTAMP:${now}`,
+        `DTSTART;VALUE=DATE:${dtStart}`,
+        `DTEND;VALUE=DATE:${dtEnd}`,
+        `SUMMARY:${summary}`,
+        "STATUS:CONFIRMED",
+        "TRANSP:OPAQUE",
+        "END:VEVENT"
+      );
+    }
+    lines.push("END:VCALENDAR");
+
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="quarto-${roomId}.ics"`);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.send(lines.join("\r\n"));
+  } catch(e) {
+    res.status(500).send("Erro: " + e.message);
+  }
+});
 
 app.use(express.static(path.join(__dirname, "build")));
 

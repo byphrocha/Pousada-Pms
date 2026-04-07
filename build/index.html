@@ -242,6 +242,7 @@ input,select,textarea{font-family:'DM Mono',monospace}
   <button class="nav-btn admin-only" onclick="showView('financeiro')" title="Financeiro" data-view="financeiro">💰</button>
   <button class="nav-btn admin-only" onclick="showView('alertas')" title="Alertas de Overbooking" data-view="alertas">⚠️</button>
   <button class="nav-btn admin-only" onclick="showView('prereservas')" title="Pré-reservas / Leads" data-view="prereservas">📝</button>
+  <button class="nav-btn admin-only" onclick="showView('calendarios')" title="Calendários iCal" data-view="calendarios">📅</button>
   <button class="nav-btn admin-only" onclick="showView('sync')" title="Sincronizar iCal" data-view="sync">🔄</button>
   <div style="flex:1"></div>
   <button class="nav-btn" onclick="showUserMenu()" title="Minha conta" id="user-nav-btn" style="font-size:14px">👤</button>
@@ -414,7 +415,7 @@ function applyRole() {
     el.style.display = authRole === "admin" ? "" : "none";
   });
   // Se estava na view de sync e é staff, volta pro mapa
-  if (authRole !== "admin" && (currentView === "sync" || currentView === "alertas" || currentView === "prereservas")) {
+  if (authRole !== "admin" && (currentView === "sync" || currentView === "alertas" || currentView === "prereservas" || currentView === "calendarios")) {
     currentView = "map";
   }
   // Atualiza tooltip do botão de usuário
@@ -635,6 +636,7 @@ function render() {
   const titles = {map:"Mapa de Quartos", reservas:"Reservas",
     hospedes:"Hóspedes", financeiro:"Financeiro",
     alertas:"⚠️ Alertas de Overbooking", prereservas:"📝 Pré-reservas & Leads",
+    calendarios:"📅 Calendários iCal — Exportar para Booking/Airbnb",
     sync:"Sincronizar iCal"};
   document.getElementById("view-title").textContent  = titles[currentView] || "";
   document.getElementById("today-label").textContent =
@@ -649,7 +651,8 @@ function render() {
   if (currentView==="financeiro")  el.innerHTML = renderFinanceiro();
   if (currentView==="alertas")     el.innerHTML = renderAlertas();
   if (currentView==="prereservas") el.innerHTML = renderPreReservas();
-  if (currentView==="sync")        el.innerHTML = renderSync();
+  if (currentView==="calendarios")  el.innerHTML = renderCalendarios();
+  if (currentView==="sync")         el.innerHTML = renderSync();
 
   // Badge de alerta no botão ⚠️
   if (authRole === "admin") {
@@ -668,7 +671,11 @@ function render() {
   }
 }
 
-function showView(v) { currentView=v; render(); }
+function showView(v) {
+  if (v !== "sync") window._calUrlsLoaded = false;
+  currentView = v;
+  render();
+}
 
 // ─── MAP VIEW ─────────────────────────────────────────────────────────────────
 function getCasaFechadaToday() {
@@ -1703,9 +1710,232 @@ async function deletePreReserva(id) {
 }
 
 
+function renderCalUrls() {
+  if (window._calError) {
+    return `<div style="color:#f59e0b;font-size:12px;padding:8px 0">
+      ⚠️ ${esc(window._calError)}
+    </div>`;
+  }
+  if (!window._calUrls) {
+    return `<div style="color:var(--mu);font-size:12px">Carregando URLs…</div>`;
+  }
+  const rooms = [
+    ["CF",    "🏡 Casa Fechada — pousada toda"],
+    ["11+12", "🔗 Suíte 11+12 combinada"],
+    ["10","11","12","20","21","22","23","24","25"].map(r => [r, `Quarto ${r}`])
+  ].flat(1);
+  const roomLabels = {
+    "CF":"🏡 Casa Fechada","11+12":"🔗 Suíte 11+12",
+    "10":"Qto 10","11":"Qto 11","12":"Qto 12","20":"Qto 20","21":"Qto 21",
+    "22":"Qto 22","23":"Qto 23","24":"Qto 24","25":"Qto 25"
+  };
+
+  let s = `<div style="display:flex;flex-direction:column;gap:6px">`;
+  for (const [id] of rooms) {
+    const url = window._calUrls[id] || "";
+    if (!url) continue;
+    s += `<div style="display:flex;align-items:center;gap:8px">
+      <div style="width:58px;font-size:11px;font-weight:700;color:var(--bl);flex-shrink:0">
+        ${esc(roomLabels[id]||id)}
+      </div>
+      <input readonly value="${esc(url)}"
+        style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
+        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:'DM Mono',monospace;
+        cursor:pointer" onclick="this.select()"
+        title="Clique para selecionar">
+      <button onclick="copyCalUrl('${esc(url)}')"
+        style="flex-shrink:0;font-size:10px;padding:5px 10px;border-radius:6px;
+        border:1px solid var(--bd);background:var(--bg3);color:var(--tx);
+        cursor:pointer;font-family:'DM Mono',monospace">
+        Copiar
+      </button>
+    </div>`;
+  }
+  s += `</div>
+  <div style="font-size:10px;color:var(--mu);margin-top:10px;line-height:1.6">
+    💡 <b style="color:var(--tx)">Como usar:</b>
+    Copie a URL do quarto correspondente e cole no campo de "iCal externo" ou
+    "Importar calendário" do Booking e do Airbnb. Eles vão bloquear automaticamente
+    as datas que já estão reservadas no PMS.
+  </div>`;
+  return s;
+}
+
+function copyCalUrl(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    alert("URL copiada!\n\n" + url);
+  }).catch(() => {
+    prompt("Copie a URL abaixo:", url);
+  });
+}
+
+// ─── CALENDÁRIOS VIEW ─────────────────────────────────────────────────────────
+function renderCalendarios() {
+  const BASE = window.location.origin;
+  const ROOMS_CAL = [
+    {id:"10", type:"Triplo AC"},
+    {id:"11", type:"Triplo Vent."},
+    {id:"12", type:"Triplo Vent."},
+    {id:"20", type:"Quádruplo AC"},
+    {id:"21", type:"Triplo AC"},
+    {id:"22", type:"Casal+1 AC"},
+    {id:"23", type:"Casal+2 AC"},
+    {id:"24", type:"Duplo AC"},
+    {id:"25", type:"Casal+1 AC"},
+  ];
+
+  const urlFor = (roomId) => `${BASE}/calendar/${roomId}.ics`;
+
+  const copyBtn = (url) =>
+    `<button onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar',2000)})"
+      style="font-size:10px;padding:4px 10px;border-radius:6px;border:1px solid var(--bd);
+      background:var(--bg3);color:var(--tx);cursor:pointer;font-family:'DM Mono',monospace;
+      white-space:nowrap;flex-shrink:0">📋 Copiar</button>`;
+
+  let html = `
+  <!-- Info -->
+  <div style="background:#0f1e2b;border:1px solid #3b82f644;border-radius:12px;
+    padding:16px 20px;margin-bottom:24px;line-height:1.7;font-size:13px;color:var(--dm)">
+    <b style="color:var(--tx)">Como funciona:</b> Cada quarto tem uma URL iCal única.
+    Você cola essa URL no Booking.com e no Airbnb — quando uma reserva direta for feita
+    no PMS, as plataformas bloqueiam automaticamente aquelas datas, evitando overbooking. <br>
+    <span style="color:var(--mu);font-size:11px">
+      ⚠️ As URLs são públicas por padrão. Para protegê-las com token,
+      adicione a variável <b>ICAL_TOKEN</b> nas variáveis de ambiente do Render.
+    </span>
+  </div>
+
+  <!-- URLs por quarto -->
+  <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:12px">
+    URLS POR QUARTO
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:28px">`;
+
+  for (const r of ROOMS_CAL) {
+    const url = urlFor(r.id);
+    html += `
+    <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:10px;
+      padding:10px 14px;display:flex;align-items:center;gap:12px">
+      <div style="width:34px;height:34px;background:var(--bg0);border-radius:8px;
+        display:flex;align-items:center;justify-content:center;font-weight:800;
+        font-size:14px;color:var(--bl);flex-shrink:0">${r.id}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--mu);margin-bottom:3px">${r.type}</div>
+        <div style="font-size:11px;color:var(--dm);overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap">${esc(url)}</div>
+      </div>
+      ${copyBtn(url)}
+    </div>`;
+  }
+
+  // URL "todos os quartos" — útil para bloquear tudo de uma vez (Casa Fechada)
+  const urlAll = urlFor("all");
+  html += `
+    <div style="background:#0f2b1a;border:1px solid #22c55e44;border-radius:10px;
+      padding:10px 14px;display:flex;align-items:center;gap:12px">
+      <div style="width:34px;height:34px;background:var(--bg0);border-radius:8px;
+        display:flex;align-items:center;justify-content:center;font-weight:800;
+        font-size:12px;color:#22c55e;flex-shrink:0">ALL</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:#22c55e;margin-bottom:3px">Todos os quartos (Casa Fechada)</div>
+        <div style="font-size:11px;color:var(--dm);overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap">${esc(urlAll)}</div>
+      </div>
+      ${copyBtn(urlAll)}
+    </div>
+  </div>
+
+  <!-- Passo a passo Booking -->
+  <div style="font-size:11px;color:#0066cc;font-weight:700;letter-spacing:.1em;margin-bottom:12px">
+    PASSO A PASSO — BOOKING.COM
+  </div>
+  <div style="background:var(--bg2);border:1px solid #0066cc33;border-radius:12px;
+    padding:18px 20px;margin-bottom:20px;font-size:13px;line-height:1.9;color:var(--dm)">
+    <b style="color:var(--tx)">1.</b> Acesse a Extranet do Booking.com →
+      <b style="color:var(--tx)">Calendário</b><br>
+    <b style="color:var(--tx)">2.</b> No canto superior direito clique em
+      <b style="color:var(--tx)">"Sincronizar calendário"</b> ou
+      <b style="color:var(--tx)">"iCal"</b><br>
+    <b style="color:var(--tx)">3.</b> Escolha
+      <b style="color:var(--tx)">"Importar calendário externo"</b><br>
+    <b style="color:var(--tx)">4.</b> Cole a URL do quarto correspondente
+      (ex: quarto 24 → URL do 24)<br>
+    <b style="color:var(--tx)">5.</b> Dê um nome (ex: "PMS - Qto 24") e salve<br>
+    <b style="color:var(--tx)">6.</b> Repita para cada quarto que você anuncia no Booking<br>
+    <div style="background:#1e2d45;border-radius:8px;padding:10px 14px;margin-top:10px;
+      font-size:12px;color:var(--mu)">
+      ⏱️ O Booking atualiza o calendário importado a cada
+      <b style="color:var(--tx)">2 a 4 horas</b>. Uma reserva direta feita no PMS
+      ficará bloqueada no Booking em até 4h.
+    </div>
+  </div>
+
+  <!-- Passo a passo Airbnb -->
+  <div style="font-size:11px;color:#ff5a5f;font-weight:700;letter-spacing:.1em;margin-bottom:12px">
+    PASSO A PASSO — AIRBNB
+  </div>
+  <div style="background:var(--bg2);border:1px solid #ff5a5f33;border-radius:12px;
+    padding:18px 20px;margin-bottom:20px;font-size:13px;line-height:1.9;color:var(--dm)">
+    <b style="color:var(--tx)">1.</b> Acesse o Airbnb →
+      <b style="color:var(--tx)">Anúncios → Selecione o quarto → Calendário</b><br>
+    <b style="color:var(--tx)">2.</b> Clique em
+      <b style="color:var(--tx)">"Disponibilidade"</b> →
+      <b style="color:var(--tx)">"Sincronizar calendários"</b><br>
+    <b style="color:var(--tx)">3.</b> Clique em
+      <b style="color:var(--tx)">"Importar calendário"</b><br>
+    <b style="color:var(--tx)">4.</b> Cole a URL do quarto correspondente<br>
+    <b style="color:var(--tx)">5.</b> Dê um nome (ex: "PMS - Qto 24") e salve<br>
+    <b style="color:var(--tx)">6.</b> Repita para cada anúncio no Airbnb<br>
+    <div style="background:#2b1e0a;border-radius:8px;padding:10px 14px;margin-top:10px;
+      font-size:12px;color:var(--mu)">
+      ⏱️ O Airbnb atualiza o calendário importado a cada
+      <b style="color:var(--tx)">1 a 2 horas</b>. Uma reserva direta feita no PMS
+      ficará bloqueada no Airbnb em até 2h.
+    </div>
+  </div>
+
+  <!-- Como funciona no total -->
+  <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:12px">
+    FLUXO COMPLETO ANTI-OVERBOOKING
+  </div>
+  <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;
+    padding:18px 20px;font-size:12px;line-height:2;color:var(--dm)">
+    🔵 <b style="color:var(--tx)">Booking → PMS:</b>
+      iCal do Booking é lido pelo PMS a cada 15min (já configurado na aba Sincronizar)<br>
+    🔴 <b style="color:var(--tx)">Airbnb → PMS:</b>
+      iCal do Airbnb é lido pelo PMS a cada 15min (já configurado na aba Sincronizar)<br>
+    🟣 <b style="color:var(--tx)">PMS → Booking:</b>
+      URL iCal do PMS importada no Booking — bloqueia datas de reservas diretas<br>
+    🟣 <b style="color:var(--tx)">PMS → Airbnb:</b>
+      URL iCal do PMS importada no Airbnb — bloqueia datas de reservas diretas<br>
+    <div style="margin-top:10px;padding:10px 14px;background:var(--bg0);border-radius:8px;
+      color:#22c55e;font-size:12px">
+      ✅ Com tudo configurado: qualquer reserva em qualquer canal bloqueia automaticamente
+      os outros em até 15 minutos (PMS) ou 2-4 horas (plataformas externas).
+    </div>
+  </div>`;
+
+  return html;
+}
+
+
+
 function renderSync() {
-  let html=`<div class="sync-info">
-    <b style="color:var(--tx)">Como usar:</b> Cole o link iCal do
+  let html = `
+  <!-- ── Seção: URLs de exportação do calendário ── -->
+  <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px 18px;margin-bottom:24px">
+    <div style="font-size:12px;color:#22c55e;font-weight:700;letter-spacing:.08em;margin-bottom:12px">
+      📤 EXPORTAR CALENDÁRIO DO PMS → BOOKING / AIRBNB
+    </div>
+    <div style="font-size:12px;color:var(--dm);margin-bottom:14px;line-height:1.6">
+      Cole estas URLs no Booking e Airbnb para que eles bloqueiem automaticamente
+      as datas já reservadas no PMS (reservas diretas, etc).
+    </div>
+    <div id="cal-urls-section">${renderCalUrls()}</div>
+  </div>
+
+  <div class="sync-info">
+    <b style="color:var(--tx)">Como usar o iCal (importar Booking/Airbnb → PMS):</b> Cole o link iCal do
     <b style="color:#0066cc">Booking.com</b> e do <b style="color:#ff5a5f">Airbnb</b> para cada quarto.
     O servidor busca as reservas e evita overbooking.<br><br>
     <b style="color:var(--tx)">Booking:</b> Extranet → Propriedade → Calendário → Exportar iCal<br>
