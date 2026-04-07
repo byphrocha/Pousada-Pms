@@ -416,6 +416,7 @@ async function runSync() {
   const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
   const log = ["⏳ Iniciando sincronização..."];
   let added = 0;
+  let cancelled = 0;
   try {
 
   for (const [source, urls] of Object.entries(icalUrls)) {
@@ -426,13 +427,48 @@ async function runSync() {
         const text = await fetchUrl(url, 0, ICAL_ALLOWED_HOSTS);
         if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
         const evts = parseIcal(text, source);
-        log.push(`   → ${evts.length} reserva(s) encontrada(s)`);
-        for (const ev of evts) {
-          const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
-          const targetRooms = roomId === "CF"    ? ALL_ROOMS
-                            : roomId === "11+12" ? ["11","12"]
-                            : [roomId];
+        log.push(`   → ${evts.length} reserva(s) no feed`);
 
+        const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
+        const targetRooms = roomId === "CF"    ? ALL_ROOMS
+                          : roomId === "11+12" ? ["11","12"]
+                          : [roomId];
+
+        // ── Conjunto de UIDs ativos neste feed ──────────────────────────────
+        const activeUids = new Set();
+        for (const ev of evts) {
+          for (const targetRoom of targetRooms) {
+            activeUids.add(`${source}-${targetRoom}-${ev.uid}`);
+          }
+        }
+
+        // ── RECONCILIAÇÃO: cancela reservas do banco que sumiram do feed ────
+        // Busca todas as reservas confirmadas importadas deste source+quartos
+        const roomFilter = targetRooms;
+        const { data: existing } = await supabase
+          .from("reservations")
+          .select("id, external_uid, guest_name, check_in")
+          .eq("source", source)
+          .eq("status", "confirmed")
+          .in("room_id", roomFilter)
+          .not("external_uid", "is", null);
+
+        const toCancel = (existing || []).filter(r =>
+          r.external_uid &&
+          r.external_uid.startsWith(`${source}-`) &&
+          !activeUids.has(r.external_uid)
+        );
+
+        for (const r of toCancel) {
+          await supabase.from("reservations")
+            .update({ status: "cancelled" })
+            .eq("id", r.id);
+          log.push(`   ✗ Cancelado: Qto ${roomFilter[0] === r.external_uid.split("-")[2] ? roomFilter[0] : "?"} — ${r.guest_name} (${r.check_in}) — sumiu do feed`);
+          cancelled++;
+        }
+
+        // ── ADIÇÃO: insere reservas novas que ainda não estão no banco ──────
+        for (const ev of evts) {
           for (const targetRoom of targetRooms) {
             const roomUid = `${source}-${targetRoom}-${ev.uid}`;
             const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).single();
@@ -448,7 +484,7 @@ async function runSync() {
                    : "Importado via iCal",
               created_at: new Date().toISOString(),
             });
-            log.push(`   ✓ Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
+            log.push(`   ✓ Novo: Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
             added++;
           }
         }
@@ -456,8 +492,11 @@ async function runSync() {
     }
   }
 
-  log.push(`✅ Concluído — ${added} nova(s) reserva(s)`);
-  return { log, added };
+  const parts = [];
+  if (added)     parts.push(`${added} nova(s)`);
+  if (cancelled) parts.push(`${cancelled} cancelada(s)`);
+  log.push(`✅ Concluído${parts.length ? ` — ${parts.join(", ")}` : " — nenhuma novidade"}`);
+  return { log, added, cancelled };
   } finally { isSyncing = false; }
 }
 
