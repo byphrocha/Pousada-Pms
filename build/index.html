@@ -1635,6 +1635,9 @@ function openPreReservaModal(id) {
 
   const roomOpts = [
     `<option value="">— Qualquer quarto —</option>`,
+    `<option value="CF" ${p.room_id==="CF"?"selected":""}>🏡 CF — Casa Fechada (pousada toda)</option>`,
+    `<option value="11+12" ${p.room_id==="11+12"?"selected":""}>🔗 11+12 — Suíte combinada</option>`,
+    `<option disabled>──────────────</option>`,
     ...ROOMS.map(r => `<option value="${r.id}" ${p.room_id===r.id?"selected":""}>${r.id} – ${r.type}</option>`)
   ].join("");
 
