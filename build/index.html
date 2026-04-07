@@ -274,7 +274,7 @@ input,select,textarea{font-family:'DM Mono',monospace}
 function esc(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
+    .replace(/\x3c/g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
@@ -1700,6 +1700,7 @@ async function deletePreReserva(id) {
 }
 
 
+function renderSync() {
   let html=`<div class="sync-info">
     <b style="color:var(--tx)">Como usar:</b> Cole o link iCal do
     <b style="color:#0066cc">Booking.com</b> e do <b style="color:#ff5a5f">Airbnb</b> para cada quarto.
