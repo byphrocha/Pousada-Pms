@@ -1,10 +1,11 @@
-const crypto  = require("crypto");
-const https   = require("https");
-const dns     = require("dns").promises;
-const fs      = require("fs");
-const path    = require("path");
-const bcrypt  = require("bcryptjs");
-const jwt     = require("jsonwebtoken");
+const express  = require("express");
+const crypto   = require("crypto");
+const https    = require("https");
+const dns      = require("dns").promises;
+const fs       = require("fs");
+const path     = require("path");
+const bcrypt   = require("bcryptjs");
+const jwt      = require("jsonwebtoken");
 const { createClient } = require("@supabase/supabase-js");
 
 const app  = express();
