@@ -1,4 +1,4 @@
-const express = require("express");
+const crypto  = require("crypto");
 const https   = require("https");
 const dns     = require("dns").promises;
 const fs      = require("fs");
@@ -293,7 +293,19 @@ async function fetchUrl(url, depth = 0, allowedHosts = null) {
   });
 }
 
-function genId() { return Math.random().toString(36).slice(2, 10); }
+function genId() { return crypto.randomBytes(6).toString("hex"); } // 12 chars hex, criptográfico
+
+// Lock para evitar syncs simultâneos (auto-sync + POST /sync)
+let isSyncing = false;
+
+// Valida formato YYYY-MM-DD
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidDate(s) {
+  if (!DATE_RE.test(s)) return false;
+  const d = new Date(s + "T12:00:00Z");
+  return !isNaN(d.getTime());
+}
+
 
 // Health check
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
@@ -310,6 +322,8 @@ app.post("/reservations", authMiddleware, async (req, res) => {
   // Valida campos obrigatórios
   if (!b.guestName || !b.checkIn || !b.checkOut || !b.roomId)
     return res.status(400).json({ error: "guestName, checkIn, checkOut e roomId são obrigatórios" });
+  if (!isValidDate(b.checkIn) || !isValidDate(b.checkOut))
+    return res.status(400).json({ error: "checkIn e checkOut devem estar no formato YYYY-MM-DD" });
   if (b.checkOut <= b.checkIn)
     return res.status(400).json({ error: "checkOut deve ser após checkIn" });
   if (b.externalUid) {
@@ -371,23 +385,45 @@ app.get("/urls", authMiddleware, adminOnly, async (req, res) => {
 });
 
 app.post("/urls", authMiddleware, adminOnly, async (req, res) => {
-  await supabase.from("settings").upsert({ key: "ical_urls", value: req.body });
+  const body = req.body || {};
+  // Valida estrutura: apenas chaves booking e airbnb, valores são objetos de strings
+  const VALID_SOURCES = ["booking", "airbnb"];
+  const VALID_ROOMS   = ["10","11","12","20","21","22","23","24","25","CF","11+12"];
+  const safe = {};
+  for (const src of VALID_SOURCES) {
+    safe[src] = {};
+    if (body[src] && typeof body[src] === "object") {
+      for (const [room, url] of Object.entries(body[src])) {
+        if (VALID_ROOMS.includes(room) && typeof url === "string")
+          safe[src][room] = url.slice(0, 500);
+      }
+    }
+  }
+  await supabase.from("settings").upsert({ key: "ical_urls", value: safe });
   res.json({ ok: true });
 });
 
 // ── Sincronização iCal ────────────────────────────────────────────────────────
+const ICAL_ALLOWED_HOSTS = [
+  "airbnb.com", "www.airbnb.com", "www.airbnb.com.br",
+  "booking.com", "ical.booking.com", "www.booking.com",
+];
+
 async function runSync() {
+  if (isSyncing) return { log: ["⚠️ Sincronização já em andamento, aguarde."], added: 0 };
+  isSyncing = true;
   const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
   const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
   const log = ["⏳ Iniciando sincronização..."];
   let added = 0;
+  try {
 
   for (const [source, urls] of Object.entries(icalUrls)) {
     for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
       log.push(`🔍 ${source} — Quarto ${roomId}`);
       try {
-        const text = await fetchUrl(url);
+        const text = await fetchUrl(url, 0, ICAL_ALLOWED_HOSTS);
         if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
         const evts = parseIcal(text, source);
         log.push(`   → ${evts.length} reserva(s) encontrada(s)`);
@@ -422,6 +458,7 @@ async function runSync() {
 
   log.push(`✅ Concluído — ${added} nova(s) reserva(s)`);
   return { log, added };
+  } finally { isSyncing = false; }
 }
 
 app.post("/sync", authMiddleware, adminOnly, async (req, res) => {
@@ -516,9 +553,12 @@ app.delete("/guests/:id", authMiddleware, adminOnly, async (req, res) => {
 // ── Transações financeiras (admin only) ───────────────────────────────────────
 app.get("/transactions", authMiddleware, adminOnly, async (req, res) => {
   const { month, type } = req.query;
+  // Valida parâmetros antes de enviar ao banco
+  const safeMonth = (month && /^\d{4}-\d{2}$/.test(month)) ? month : null;
+  const safeType  = ["income","expense"].includes(type) ? type : null;
   let query = supabase.from("transactions").select("*").order("date", { ascending: false });
-  if (month) query = query.eq("month", month);
-  if (type)  query = query.eq("type", type);
+  if (safeMonth) query = query.eq("month", safeMonth);
+  if (safeType)  query = query.eq("type",  safeType);
   const { data, error } = await query.limit(500);
   if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
