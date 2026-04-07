@@ -240,6 +240,8 @@ input,select,textarea{font-family:'DM Mono',monospace}
   <button class="nav-btn" onclick="showView('reservas')" title="Reservas" data-view="reservas">📋</button>
   <button class="nav-btn" onclick="showView('hospedes')" title="Hóspedes" data-view="hospedes">👥</button>
   <button class="nav-btn admin-only" onclick="showView('financeiro')" title="Financeiro" data-view="financeiro">💰</button>
+  <button class="nav-btn admin-only" onclick="showView('alertas')" title="Alertas de Overbooking" data-view="alertas">⚠️</button>
+  <button class="nav-btn admin-only" onclick="showView('prereservas')" title="Pré-reservas / Leads" data-view="prereservas">📝</button>
   <button class="nav-btn admin-only" onclick="showView('sync')" title="Sincronizar iCal" data-view="sync">🔄</button>
   <div style="flex:1"></div>
   <button class="nav-btn" onclick="showUserMenu()" title="Minha conta" id="user-nav-btn" style="font-size:14px">👤</button>
@@ -319,7 +321,9 @@ let searchQ      = "";
 let dateFrom     = "";
 let dateTo       = "";
 let groupByDate  = true;          // agrupamento por data nas reservas
-let cleanedRooms   = new Set();   // quartos marcados como limpos hoje
+let prereservations = [];
+
+
 let checkedInRooms = new Set();   // quartos com check-in confirmado hoje
 
 async function saveRoomStates() {
@@ -410,7 +414,7 @@ function applyRole() {
     el.style.display = authRole === "admin" ? "" : "none";
   });
   // Se estava na view de sync e é staff, volta pro mapa
-  if (authRole !== "admin" && (currentView === "sync")) {
+  if (authRole !== "admin" && (currentView === "sync" || currentView === "alertas" || currentView === "prereservas")) {
     currentView = "map";
   }
   // Atualiza tooltip do botão de usuário
@@ -488,16 +492,18 @@ async function loadAll() {
       api("GET","/room-states"),
       authRole === "admin" ? api("GET","/urls") : Promise.resolve(null),
       authRole === "admin" ? api("GET","/transactions?month="+finMonth) : Promise.resolve(null),
+      authRole === "admin" ? api("GET","/prereservations") : Promise.resolve(null),
     ];
-    const [res, gsts, states, urls, txns] = await Promise.all(promises);
+    const [res, gsts, states, urls, txns, preresvs] = await Promise.all(promises);
     reservations = Array.isArray(res)
       ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
       : [];
     guests        = Array.isArray(gsts) ? gsts : [];
     cleanedRooms   = new Set(states?.cleaned   || []);
     checkedInRooms = new Set(states?.checkedIn || []);
-    if (urls)  icalUrls     = urls;
-    if (txns)  transactions = Array.isArray(txns) ? txns : [];
+    if (urls)     icalUrls      = urls;
+    if (txns)     transactions  = Array.isArray(txns)     ? txns     : [];
+    if (preresvs) prereservations = Array.isArray(preresvs) ? preresvs : [];
   } catch(e) { console.error(e); }
   render();
 }
@@ -627,7 +633,9 @@ const SRC_COLOR = {direto:"#8b5cf6",booking:"#0066cc",airbnb:"#ff5a5f"};
 // ─── Render engine ────────────────────────────────────────────────────────────
 function render() {
   const titles = {map:"Mapa de Quartos", reservas:"Reservas",
-    hospedes:"Hóspedes", financeiro:"Financeiro", sync:"Sincronizar iCal"};
+    hospedes:"Hóspedes", financeiro:"Financeiro",
+    alertas:"⚠️ Alertas de Overbooking", prereservas:"📝 Pré-reservas & Leads",
+    sync:"Sincronizar iCal"};
   document.getElementById("view-title").textContent  = titles[currentView] || "";
   document.getElementById("today-label").textContent =
     new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
@@ -635,11 +643,29 @@ function render() {
     b.classList.toggle("active", b.dataset.view===currentView);
   });
   const el = document.getElementById("content");
-  if (currentView==="map")      el.innerHTML = renderMap();
-  if (currentView==="reservas") el.innerHTML = renderReservas();
-  if (currentView==="hospedes") el.innerHTML = renderHospedes();
-  if (currentView==="financeiro") el.innerHTML = renderFinanceiro();
-  if (currentView==="sync")       el.innerHTML = renderSync();
+  if (currentView==="map")         el.innerHTML = renderMap();
+  if (currentView==="reservas")    el.innerHTML = renderReservas();
+  if (currentView==="hospedes")    el.innerHTML = renderHospedes();
+  if (currentView==="financeiro")  el.innerHTML = renderFinanceiro();
+  if (currentView==="alertas")     el.innerHTML = renderAlertas();
+  if (currentView==="prereservas") el.innerHTML = renderPreReservas();
+  if (currentView==="sync")        el.innerHTML = renderSync();
+
+  // Badge de alerta no botão ⚠️
+  if (authRole === "admin") {
+    const confirmed = reservations.filter(r => r.status !== "cancelled");
+    let alertCount = 0;
+    for (let i = 0; i < confirmed.length; i++)
+      for (let j = i+1; j < confirmed.length; j++) {
+        const a = confirmed[i], b = confirmed[j];
+        if (a.roomId === b.roomId && a.checkIn < b.checkOut && b.checkIn < a.checkOut) alertCount++;
+      }
+    const alertBtn = document.querySelector('.nav-btn[data-view="alertas"]');
+    if (alertBtn) alertBtn.innerHTML = alertCount > 0
+      ? `⚠️<span style="position:absolute;top:4px;right:4px;width:8px;height:8px;background:#ef4444;border-radius:50%"></span>`
+      : "⚠️";
+    if (alertBtn) alertBtn.style.position = "relative";
+  }
 }
 
 function showView(v) { currentView=v; render(); }
@@ -1385,7 +1411,295 @@ async function deleteTransaction(id) {
 }
 
 
-function renderSync() {
+// ─── ALERTAS VIEW ─────────────────────────────────────────────────────────────
+function renderAlertas() {
+  // Detecta overbooking: mesma sala, datas sobrepostas, fontes diferentes
+  const confirmed = reservations.filter(r => r.status !== "cancelled");
+  const conflicts = [];
+
+  for (let i = 0; i < confirmed.length; i++) {
+    for (let j = i + 1; j < confirmed.length; j++) {
+      const a = confirmed[i], b = confirmed[j];
+      if (a.roomId !== b.roomId) continue;
+      // Sobreposição: a começa antes de b terminar E b começa antes de a terminar
+      if (a.checkIn >= b.checkOut || b.checkIn >= a.checkOut) continue;
+      // Só alerta se fontes diferentes OU ambas confirmadas do mesmo source (duplicata)
+      const key = [a.id, b.id].sort().join("|");
+      if (!conflicts.find(c => c.key === key)) {
+        conflicts.push({ key, a, b });
+      }
+    }
+  }
+
+  // Também detecta pré-reservas que conflitam com reservas confirmadas
+  const preConflicts = [];
+  for (const pre of prereservations) {
+    if (!pre.check_in || !pre.check_out) continue;
+    if (pre.status === "recusado") continue;
+    const norm = { roomId: pre.room_id, checkIn: pre.check_in, checkOut: pre.check_out };
+    const clash = confirmed.find(r =>
+      r.roomId === norm.roomId &&
+      r.checkIn < norm.checkOut &&
+      r.checkOut > norm.checkIn
+    );
+    if (clash) preConflicts.push({ pre, clash });
+  }
+
+  const total = conflicts.length + preConflicts.length;
+
+  let html = `<div style="margin-bottom:20px">`;
+
+  if (total === 0) {
+    html += `<div style="text-align:center;padding:60px 0">
+      <div style="font-size:48px;margin-bottom:12px">✅</div>
+      <div style="font-size:16px;font-weight:700;color:#22c55e">Nenhum conflito detectado</div>
+      <div style="font-size:13px;color:var(--mu);margin-top:6px">
+        Todas as reservas confirmadas estão sem sobreposição de datas.
+      </div>
+    </div>`;
+  } else {
+    html += `<div style="background:#2b0f0f;border:1px solid #ef444466;border-radius:12px;
+      padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:28px">⚠️</span>
+      <div>
+        <div style="font-weight:700;color:#ef4444;font-size:14px">${total} conflito${total!==1?"s":""} encontrado${total!==1?"s":""}</div>
+        <div style="font-size:12px;color:var(--mu);margin-top:2px">Verifique e resolva antes de aceitar novas reservas</div>
+      </div>
+    </div>`;
+  }
+
+  // Conflitos entre reservas confirmadas
+  if (conflicts.length > 0) {
+    html += `<div style="font-size:11px;color:#ef4444;font-weight:700;letter-spacing:.1em;margin-bottom:12px">
+      OVERBOOKING — RESERVAS CONFIRMADAS</div>`;
+
+    conflicts.forEach(({ a, b }) => {
+      const srcA = SRC_COLOR[a.source] || "var(--mu)";
+      const srcB = SRC_COLOR[b.source] || "var(--mu)";
+      const room = ROOMS.find(r => r.id === a.roomId);
+      const overlapStart = a.checkIn > b.checkIn ? a.checkIn : b.checkIn;
+      const overlapEnd   = a.checkOut < b.checkOut ? a.checkOut : b.checkOut;
+      html += `<div style="background:var(--bg2);border:1.5px solid #ef444444;border-radius:12px;
+        padding:16px 18px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <div style="background:#2b0f0f;border:1px solid #ef4444;border-radius:8px;
+            padding:6px 12px;font-weight:800;font-size:16px;color:#ef4444">${esc(a.roomId)}</div>
+          <div>
+            <div style="font-weight:700;font-size:13px;color:#ef4444">Overbooking no Quarto ${esc(a.roomId)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:2px">${room?.type||""} · Sobreposição: ${fmtDate(overlapStart)} → ${fmtDate(overlapEnd)}</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          ${[a,b].map((r,i) => `
+          <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;
+            border-left:3px solid ${i===0?srcA:srcB}">
+            <div style="font-size:10px;color:${i===0?srcA:srcB};font-weight:700;letter-spacing:.08em;margin-bottom:4px">${esc(r.source).toUpperCase()}</div>
+            <div style="font-weight:700;font-size:13px">${esc(r.guestName)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</div>
+            ${r.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(r.phone)}</div>` : ""}
+            <button onclick="openEditModal('${esc(r.id)}')"
+              style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
+              border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:'DM Mono',monospace">
+              Ver reserva →
+            </button>
+          </div>`).join("")}
+        </div>
+      </div>`;
+    });
+  }
+
+  // Pré-reservas conflitando com confirmadas
+  if (preConflicts.length > 0) {
+    html += `<div style="font-size:11px;color:#f59e0b;font-weight:700;letter-spacing:.1em;
+      margin:20px 0 12px">PRÉ-RESERVAS COM CONFLITO</div>`;
+    preConflicts.forEach(({ pre, clash }) => {
+      const srcClr = SRC_COLOR[clash.source] || "var(--mu)";
+      html += `<div style="background:var(--bg2);border:1.5px solid #f59e0b44;border-radius:12px;
+        padding:16px 18px;margin-bottom:12px">
+        <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:10px">
+          ⚠️ PRÉ-RESERVA vs CONFIRMADA — Quarto ${esc(pre.room_id||"")}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;border-left:3px solid #f59e0b">
+            <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:4px">PRÉ-RESERVA</div>
+            <div style="font-weight:700;font-size:13px">${esc(pre.guest_name||"")}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(pre.check_in)} → ${fmtDate(pre.check_out)}</div>
+            ${pre.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(pre.phone)}</div>` : ""}
+            <button onclick="openPreReservaModal('${esc(pre.id)}')"
+              style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
+              border:1px solid #f59e0b44;background:var(--bg2);color:#f59e0b;cursor:pointer;font-family:'DM Mono',monospace">
+              Editar →
+            </button>
+          </div>
+          <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;border-left:3px solid ${srcClr}">
+            <div style="font-size:10px;color:${srcClr};font-weight:700;margin-bottom:4px">${esc(clash.source).toUpperCase()} — CONFIRMADA</div>
+            <div style="font-weight:700;font-size:13px">${esc(clash.guestName)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(clash.checkIn)} → ${fmtDate(clash.checkOut)}</div>
+            <button onclick="openEditModal('${esc(clash.id)}')"
+              style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
+              border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:'DM Mono',monospace">
+              Ver reserva →
+            </button>
+          </div>
+        </div>
+      </div>`;
+    });
+  }
+
+  html += `</div>
+  <div style="font-size:11px;color:var(--mu);text-align:center;padding-top:8px">
+    Atualizado em tempo real com as reservas do sistema. Sincronize o iCal para verificar cancelamentos.
+  </div>`;
+  return html;
+}
+
+// ─── PRÉ-RESERVAS VIEW ────────────────────────────────────────────────────────
+const PRE_STATUS = {
+  aguardando: { label:"Aguardando",  color:"#f59e0b", bg:"#2b1e0a" },
+  confirmado: { label:"Confirmado",  color:"#22c55e", bg:"#0f2b1a" },
+  recusado:   { label:"Recusado",    color:"#ef4444", bg:"#2b0f0f" },
+};
+
+function renderPreReservas() {
+  const today = todayStr();
+  const active   = prereservations.filter(p => p.status !== "recusado" && (!p.check_out || p.check_out >= today));
+  const past     = prereservations.filter(p => p.status === "recusado"  || (p.check_out && p.check_out < today));
+
+  let html = `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+    <div style="font-size:13px;color:var(--mu)">
+      Anote hóspedes interessados em datas específicas antes de confirmar a reserva.
+    </div>
+    <button class="btn btn-green" onclick="openPreReservaModal(null)">+ Nova Pré-reserva</button>
+  </div>`;
+
+  if (!prereservations.length) {
+    html += `<div style="text-align:center;color:var(--mu);padding:48px 0;font-size:14px">
+      Nenhuma pré-reserva cadastrada. Use para anotar leads e hóspedes interessados.
+    </div>`;
+    return html;
+  }
+
+  const renderGroup = (list, title, color) => {
+    if (!list.length) return "";
+    let s = `<div style="font-size:11px;color:${color};font-weight:700;letter-spacing:.1em;margin:20px 0 10px">${title}</div>`;
+    list.forEach(p => {
+      const st = PRE_STATUS[p.status] || PRE_STATUS.aguardando;
+      const room = ROOMS.find(r => r.id === p.room_id);
+      const n = p.check_in && p.check_out ? Math.max(0,Math.round((new Date(p.check_out)-new Date(p.check_in))/86400000)) : 0;
+      // Checa conflito com reservas confirmadas
+      const hasConflict = p.check_in && p.check_out && p.status !== "recusado" &&
+        reservations.some(r =>
+          r.roomId === p.room_id && r.status !== "cancelled" &&
+          r.checkIn < p.check_out && r.checkOut > p.check_in
+        );
+      s += `<div style="background:var(--bg2);border:1.5px solid ${hasConflict?"#ef444466":st.color+"33"};
+        border-radius:12px;padding:14px 16px;margin-bottom:8px;cursor:pointer;
+        display:flex;align-items:flex-start;gap:14px"
+        onclick="openPreReservaModal('${esc(p.id)}')">
+        <div style="width:46px;height:46px;border-radius:10px;background:${st.bg};
+          border:1px solid ${st.color}44;display:flex;align-items:center;justify-content:center;
+          font-size:16px;font-weight:800;color:${st.color};flex-shrink:0">
+          ${esc(p.room_id||"?")}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px">
+            ${esc(p.guest_name||"Sem nome")}
+            ${hasConflict ? `<span class="pill" style="background:#ef444422;color:#ef4444">⚠️ conflito</span>` : ""}
+          </div>
+          <div style="font-size:11px;color:var(--mu);margin-top:3px">
+            ${room ? room.type+" · " : ""}
+            ${p.check_in ? fmtDate(p.check_in)+" → "+fmtDate(p.check_out) : "Datas não definidas"}
+            ${n > 0 ? ` · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>` : ""}
+            ${p.phone ? ` · 📞 ${esc(p.phone)}` : ""}
+          </div>
+          ${p.notes ? `<div style="font-size:11px;color:var(--dm);margin-top:5px;padding:6px 10px;
+            background:var(--bg0);border-radius:6px;white-space:pre-wrap">${esc(p.notes)}</div>` : ""}
+        </div>
+        <div style="flex-shrink:0;text-align:right">
+          <span class="pill" style="background:${st.bg};color:${st.color}">${st.label}</span>
+        </div>
+      </div>`;
+    });
+    return s;
+  };
+
+  html += renderGroup(active, "ATIVAS / AGUARDANDO", "#f59e0b");
+  html += renderGroup(past,   "PASSADAS / RECUSADAS", "var(--mu)");
+  return html;
+}
+
+function openPreReservaModal(id) {
+  const p = id ? (prereservations.find(x => x.id === id) || {}) : {};
+  const isEdit = !!id;
+  const today  = todayStr();
+
+  const roomOpts = [
+    `<option value="">— Qualquer quarto —</option>`,
+    ...ROOMS.map(r => `<option value="${r.id}" ${p.room_id===r.id?"selected":""}>${r.id} – ${r.type}</option>`)
+  ].join("");
+
+  const statusOpts = Object.entries(PRE_STATUS).map(([k,v]) =>
+    `<option value="${k}" ${(p.status||"aguardando")===k?"selected":""}>${v.label}</option>`
+  ).join("");
+
+  document.getElementById("modal-title").innerHTML =
+    `${isEdit?"📝 Editar":"📝 Nova"} Pré-reserva <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      <div class="row2">
+        <div class="field"><label>Quarto de Interesse</label>
+          <select id="pr-room">${roomOpts}</select></div>
+        <div class="field"><label>Status</label>
+          <select id="pr-status">${statusOpts}</select></div>
+      </div>
+      <div class="field"><label>Nome do Hóspede</label>
+        <input id="pr-name" value="${esc(p.guest_name||"")}" placeholder="Nome ou apelido" autofocus></div>
+      <div class="field"><label>Telefone / WhatsApp</label>
+        <input id="pr-phone" value="${esc(p.phone||"")}" placeholder="(44) 99999-9999"></div>
+      <div class="row2">
+        <div class="field"><label>Check-in pretendido</label>
+          <input type="date" id="pr-checkin" value="${esc(p.check_in||"")}"></div>
+        <div class="field"><label>Check-out pretendido</label>
+          <input type="date" id="pr-checkout" value="${esc(p.check_out||"")}"></div>
+      </div>
+      <div class="field"><label>Notas / Observações</label>
+        <textarea id="pr-notes" style="height:90px">${esc(p.notes||"")}</textarea></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      ${isEdit?`<button class="btn btn-red" onclick="deletePreReserva('${esc(p.id)}')">Excluir</button>`:""}
+      <button class="btn btn-green" onclick="savePreReserva(${isEdit?`'${esc(p.id)}'`:"null"})">
+        ${isEdit?"Salvar Alterações":"Criar Pré-reserva"}
+      </button>
+    </div>`;
+  document.getElementById("modal").style.display = "flex";
+}
+
+async function savePreReserva(id) {
+  const get = i => document.getElementById(i)?.value || "";
+  const body = {
+    roomId:    get("pr-room"),
+    guestName: get("pr-name").trim(),
+    phone:     get("pr-phone").trim(),
+    checkIn:   get("pr-checkin")  || null,
+    checkOut:  get("pr-checkout") || null,
+    notes:     get("pr-notes").trim(),
+    status:    get("pr-status"),
+  };
+  if (!body.guestName) { alert("Informe ao menos o nome do hóspede."); return; }
+  if (id) await api("PUT",  "/prereservations/"+id, body);
+  else    await api("POST", "/prereservations", body);
+  closeModal();
+  await loadAll();
+}
+
+async function deletePreReserva(id) {
+  if (!confirm("Excluir esta pré-reserva?")) return;
+  await api("DELETE", "/prereservations/"+id);
+  closeModal();
+  await loadAll();
+}
+
+
   let html=`<div class="sync-info">
     <b style="color:var(--tx)">Como usar:</b> Cole o link iCal do
     <b style="color:#0066cc">Booking.com</b> e do <b style="color:#ff5a5f">Airbnb</b> para cada quarto.

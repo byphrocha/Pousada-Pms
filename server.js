@@ -646,7 +646,59 @@ app.delete("/transactions/:id", authMiddleware, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Arquivos estáticos (DEPOIS das rotas de API) ───────────────────────────────
+// ── Pré-reservas (leads / interesse de hóspedes) ─────────────────────────────
+app.get("/prereservations", authMiddleware, adminOnly, async (req, res) => {
+  const { data, error } = await supabase
+    .from("prereservations").select("*").order("check_in");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post("/prereservations", authMiddleware, adminOnly, async (req, res) => {
+  const b = req.body || {};
+  const row = {
+    id:         b.id || genId(),
+    room_id:    String(b.roomId || "").slice(0, 10),
+    guest_name: String(b.guestName || "").slice(0, 200),
+    phone:      String(b.phone || "").slice(0, 30),
+    check_in:   b.checkIn  || null,
+    check_out:  b.checkOut || null,
+    notes:      String(b.notes || "").slice(0, 2000),
+    status:     ["aguardando","confirmado","recusado"].includes(b.status) ? b.status : "aguardando",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from("prereservations").insert(row).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.put("/prereservations/:id", authMiddleware, adminOnly, async (req, res) => {
+  const b = req.body || {};
+  const row = {
+    room_id:    b.roomId    !== undefined ? String(b.roomId).slice(0, 10)     : undefined,
+    guest_name: b.guestName !== undefined ? String(b.guestName).slice(0, 200) : undefined,
+    phone:      b.phone     !== undefined ? String(b.phone).slice(0, 30)      : undefined,
+    check_in:   b.checkIn   !== undefined ? b.checkIn  : undefined,
+    check_out:  b.checkOut  !== undefined ? b.checkOut : undefined,
+    notes:      b.notes     !== undefined ? String(b.notes).slice(0, 2000)    : undefined,
+    status:     b.status    !== undefined ?
+      (["aguardando","confirmado","recusado"].includes(b.status) ? b.status : "aguardando") : undefined,
+    updated_at: new Date().toISOString(),
+  };
+  Object.keys(row).forEach(k => row[k] === undefined && delete row[k]);
+  const { data, error } = await supabase.from("prereservations").update(row).eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete("/prereservations/:id", authMiddleware, adminOnly, async (req, res) => {
+  const { error } = await supabase.from("prereservations").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+
 app.use(express.static(path.join(__dirname, "build")));
 
 // ── Fallback SPA ──────────────────────────────────────────────────────────────
