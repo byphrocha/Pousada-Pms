@@ -200,17 +200,32 @@ function parseIcal(text, source) {
   const events = [];
   const blocks  = text.split("BEGIN:VEVENT");
   const parseDate = (s) => {
-    const c = s.replace(/[TZ]/g, "").slice(0, 8);
+    if (!s) return null;
+    const c = String(s).replace(/[^0-9]/g, "").slice(0, 8);
+    if (c.length !== 8) return null;
     return `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`;
   };
+  
   for (let i = 1; i < blocks.length; i++) {
-    const b   = blocks[i];
-    const get = (k) => { const m = b.match(new RegExp(k + "[^:]*:(.+)")); return m ? m[1].trim() : ""; };
-    const dtstart = get("DTSTART"), dtend = get("DTEND"), summary = get("SUMMARY"), uid = get("UID");
+    const b = blocks[i];
+    // Extrai de forma mais robusta com split por newlines
+    const lines = b.split("\n");
+    let dtstart = null, dtend = null, summary = "", uid = "";
+    
+    for (const line of lines) {
+      const [key, ...valueParts] = line.split(":");
+      const value = valueParts.join(":").trim();
+      
+      if (key.startsWith("DTSTART")) dtstart = parseDate(value);
+      else if (key.startsWith("DTEND")) dtend = parseDate(value);
+      else if (key === "SUMMARY") summary = value;
+      else if (key === "UID") uid = value;
+    }
+    
     if (!dtstart || !dtend) continue;
-    // Só ignora bloqueios se for Airbnb — no Booking "Closed" pode ser reserva real
+    // Ignora bloqueios do Airbnb (indisponibilidades, não reservas)
     if (source === "airbnb" && isAirbnbBlock(summary, uid)) continue;
-    events.push({ uid, summary, checkIn: parseDate(dtstart), checkOut: parseDate(dtend) });
+    events.push({ uid, summary, checkIn: dtstart, checkOut: dtend });
   }
   return events;
 }
