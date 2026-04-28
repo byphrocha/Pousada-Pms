@@ -186,11 +186,17 @@ app.put("/guests/:id", authMiddleware, async (req, res) => {
 
 // Utilitários iCal
 const AIRBNB_BLOCKED = [
-  /not available/i, /^blocked$/i, /unavailable/i,
-  /bloqueado/i, /indispon/i,
+  /^blocked$/i,           // Bloqueios explícitos
+  /^unavailable$/i,       // Indisponibilidades
+  /bloqueado/i,           // Em português
+  /indispon/i,            // Em português
 ];
 
 function isAirbnbBlock(summary, uid) {
+  // Airbnb usa "Airbnb (Not available)" como SUMMARY padrão para RESERVAS confirmadas
+  // Não deve ser bloqueado — apenas bloqueios e indisponibilidades reais
+  if (summary === "Airbnb (Not available)") return false;
+  
   if (AIRBNB_BLOCKED.some(p => p.test(summary||""))) return true;
   if (/CLOSED|BLOCK/i.test(uid||"") && !summary) return true;
   return false;
