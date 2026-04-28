@@ -198,17 +198,42 @@ function isAirbnbBlock(summary, uid) {
 
 function parseIcal(text, source) {
   const events = [];
-  const blocks  = text.split("BEGIN:VEVENT");
+  
+  // DEBUG: log do tamanho e conteúdo inicial
+  if (!text || text.length === 0) {
+    console.error(`[parseIcal] iCal vazio ou null para source=${source}`);
+    return events;
+  }
+  
+  console.log(`[parseIcal] Recebido ${text.length} bytes do ${source}`);
+  
+  // Verifica se tem BEGIN:VCALENDAR
+  if (!text.includes("BEGIN:VCALENDAR")) {
+    console.error(`[parseIcal] Não encontrado BEGIN:VCALENDAR no iCal do ${source}`);
+    console.log(`[parseIcal] Primeiros 200 chars: ${text.slice(0, 200)}`);
+    return events;
+  }
+  
+  const blocks = text.split("BEGIN:VEVENT");
+  console.log(`[parseIcal] Encontrados ${blocks.length - 1} blocos VEVENT do ${source}`);
+  
+  if (blocks.length <= 1) {
+    console.log(`[parseIcal] Nenhum evento encontrado no iCal do ${source}`);
+    return events;
+  }
+  
   const parseDate = (s) => {
     if (!s) return null;
     const c = String(s).replace(/[^0-9]/g, "").slice(0, 8);
-    if (c.length !== 8) return null;
+    if (c.length !== 8) {
+      console.warn(`[parseDate] Data inválida: ${s} -> ${c}`);
+      return null;
+    }
     return `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`;
   };
   
   for (let i = 1; i < blocks.length; i++) {
     const b = blocks[i];
-    // Extrai de forma mais robusta com split por newlines
     const lines = b.split("\n");
     let dtstart = null, dtend = null, summary = "", uid = "";
     
@@ -222,11 +247,21 @@ function parseIcal(text, source) {
       else if (key === "UID") uid = value;
     }
     
-    if (!dtstart || !dtend) continue;
-    // Ignora bloqueios do Airbnb (indisponibilidades, não reservas)
-    if (source === "airbnb" && isAirbnbBlock(summary, uid)) continue;
+    if (!dtstart || !dtend) {
+      console.warn(`[parseIcal] Evento ${i} do ${source} sem datas válidas: dtstart=${dtstart}, dtend=${dtend}`);
+      continue;
+    }
+    
+    if (source === "airbnb" && isAirbnbBlock(summary, uid)) {
+      console.log(`[parseIcal] Evento ${i} bloqueado (Airbnb block): ${summary}`);
+      continue;
+    }
+    
+    console.log(`[parseIcal] Evento ${i} adicionado: ${summary} (${dtstart} → ${dtend})`);
     events.push({ uid, summary, checkIn: dtstart, checkOut: dtend });
   }
+  
+  console.log(`[parseIcal] Total de eventos extraídos do ${source}: ${events.length}`);
   return events;
 }
 
@@ -441,7 +476,12 @@ async function runSync() {
       log.push(`🔍 ${source} — Quarto ${roomId}`);
       try {
         const text = await fetchUrl(url, 0, ICAL_ALLOWED_HOSTS);
-        if (!text.includes("BEGIN:VCALENDAR")) { log.push(`   ⚠️ Resposta inválida`); continue; }
+        console.log(`[runSync] Recebido ${text.length} bytes do ${source}/${roomId}`);
+        if (!text.includes("BEGIN:VCALENDAR")) { 
+          console.error(`[runSync] Resposta inválida do ${source}/${roomId}: não é iCal`);
+          log.push(`   ⚠️ Resposta inválida`); 
+          continue; 
+        }
         const evts = parseIcal(text, source);
         log.push(`   → ${evts.length} reserva(s) no feed`);
 
