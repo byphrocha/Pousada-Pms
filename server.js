@@ -496,36 +496,24 @@ async function runSync() {
                           : roomId === "11+12" ? ["11","12"]
                           : [roomId];
 
-        // ── Conjunto de UIDs ativos neste feed ──────────────────────────────
-        const activeUids = new Set();
-        for (const ev of evts) {
-          for (const targetRoom of targetRooms) {
-            activeUids.add(`${source}-${targetRoom}-${ev.uid}`);
-          }
-        }
+        
 
-        // ── RECONCILIAÇÃO: cancela reservas do banco que sumiram do feed ────
-        // Busca todas as reservas confirmadas importadas deste source+quartos
-        const roomFilter = targetRooms;
-        const { data: existing } = await supabase
+        // ── RECONCILIAÇÃO: cancelar apenas reservas com data passada ────────
+        // Não cancelar por UID (pode variar entre syncs do Airbnb/Booking)
+        const today = new Date().toISOString().split("T")[0];
+        const { data: outdated } = await supabase
           .from("reservations")
-          .select("id, external_uid, guest_name, check_in")
+          .select("id, guest_name, check_in")
           .eq("source", source)
           .eq("status", "confirmed")
           .in("room_id", roomFilter)
-          .not("external_uid", "is", null);
+          .lt("check_out", today);  // Data de saída já passou
 
-        const toCancel = (existing || []).filter(r =>
-          r.external_uid &&
-          r.external_uid.startsWith(`${source}-`) &&
-          !activeUids.has(r.external_uid)
-        );
-
-        for (const r of toCancel) {
+        for (const r of outdated || []) {
           await supabase.from("reservations")
             .update({ status: "cancelled" })
             .eq("id", r.id);
-          log.push(`   ✗ Cancelado: Qto ${roomFilter[0] === r.external_uid.split("-")[2] ? roomFilter[0] : "?"} — ${r.guest_name} (${r.check_in}) — sumiu do feed`);
+          log.push(`   ✓ Cancelado automaticamente: ${r.guest_name} (${r.check_in}) — check-out já passou`);
           cancelled++;
         }
 
