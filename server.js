@@ -496,7 +496,7 @@ async function runSync() {
                           : roomId === "11+12" ? ["11","12"]
                           : [roomId];
 
-        
+        const roomFilter = targetRooms;
 
         // ── RECONCILIAÇÃO: cancelar apenas reservas com data passada ────────
         // Não cancelar por UID (pode variar entre syncs do Airbnb/Booking)
