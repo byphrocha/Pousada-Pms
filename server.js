@@ -521,7 +521,7 @@ async function runSync() {
         for (const ev of evts) {
           for (const targetRoom of targetRooms) {
             const roomUid = `${source}-${targetRoom}-${ev.uid}`;
-            const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).single();
+            const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).maybeSingle();
             if (exists) continue;
             await supabase.from("reservations").insert({
               id: genId(), room_id: targetRoom, external_uid: roomUid, status: "confirmed",
