@@ -645,9 +645,18 @@ app.get("/transactions", authMiddleware, adminOnly, async (req, res) => {
   // Valida parâmetros antes de enviar ao banco
   const safeMonth = (month && /^\d{4}-\d{2}$/.test(month)) ? month : null;
   const safeType  = ["income","expense"].includes(type) ? type : null;
+  // Filtro por reserva: usado na edição para achar o lançamento vinculado
+  // independentemente do mês carregado na tela (achado F2).
+  const rid = req.query.reservation_id;
+  const safeResId = (typeof rid === "string" && /^[A-Za-z0-9_-]{1,20}$/.test(rid)) ? rid : null;
+  // Filtro pedido mas inválido: recusa em vez de ignorar (ignorar devolveria
+  // todos os lançamentos e a tela poderia atualizar o lançamento errado).
+  if (rid !== undefined && !safeResId)
+    return res.status(400).json({ error: "reservation_id inválido" });
   let query = supabase.from("transactions").select("*").order("date", { ascending: false });
   if (safeMonth) query = query.eq("month", safeMonth);
   if (safeType)  query = query.eq("type",  safeType);
+  if (safeResId) query = query.eq("reservation_id", safeResId);
   const { data, error } = await query.limit(500);
   if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
