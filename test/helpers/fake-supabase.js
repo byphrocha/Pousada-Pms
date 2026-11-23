@@ -23,6 +23,7 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false } = 
       in(c, vs) { state.filters.push(r => vs.map(String).includes(String(r[c]))); return api; },
       lt(c, v)  { state.filters.push(r => String(r[c]) < String(v)); return api; },
       gt(c, v)  { state.filters.push(r => String(r[c]) > String(v)); return api; },
+      gte(c, v) { state.filters.push(r => String(r[c]) >= String(v)); return api; },
       order()   { return api; },
       limit()   { return api; },
       single()      { state.single = "single"; return api; },
