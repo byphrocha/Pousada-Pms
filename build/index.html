@@ -324,6 +324,9 @@ let reservations = [];
 let guests        = [];
 let guestSearch   = "";
 let transactions  = [];
+// PMS-007: pagamentos ativos quando a tabela existe no banco (o servidor informa).
+let paymentsEnabled = false;
+let receivables     = [];
 let finMonth      = todayStr().slice(0,7); // YYYY-MM
 let currentView  = "map";
 let syncLog      = [];
@@ -551,6 +554,10 @@ async function loadAll() {
       if (Array.isArray(preresvs)) prereservations = preresvs; else failed.push("pré-reservas");
     }
   } catch(e) { console.error(e); failed.push("conexão"); }
+  if (authRole === "admin") {
+    const ps = await api("GET", "/payments/status");
+    if (ps && typeof ps.enabled === "boolean") paymentsEnabled = ps.enabled;
+  }
   loadError = failed.length ? `Não foi possível atualizar: ${failed.join(", ")}.` : null;
   await refreshSyncStatus();
   render();
@@ -674,7 +681,9 @@ async function saveReservation(form) {
     if (err) return { ok:false, error: err };
     // Ajuste de valor em reserva direta: só ATUALIZA o lançamento já vinculado.
     // Não cria lançamento novo na edição (antes isso duplicava receita — F2).
-    if (form.amount > 0 && form.source === "direto" && authRole === "admin") {
+    // Modo antigo (sem pagamentos): ajusta o lançamento vinculado. Com pagamentos
+    // ativos, mudar o valor contratado NÃO mexe na receita (regra 6).
+    if (!paymentsEnabled && form.amount > 0 && form.source === "direto" && authRole === "admin") {
       const linked = await api("GET", "/transactions?reservation_id=" + encodeURIComponent(form.id));
       const existing = Array.isArray(linked)
         ? linked.find(t => t.reservation_id === form.id && t.type === "income")
@@ -1391,6 +1400,7 @@ const FIN_CATEGORIES = {
   compras:        { label:"Compras",           icon:"🛒", type:"expense" },
   funcionario:    { label:"Funcionários",      icon:"👷", type:"expense" },
   outro_gasto:    { label:"Outra Despesa",     icon:"📦", type:"expense" },
+  estorno_reserva:{ label:"Estorno de Reserva", icon:"↩️", type:"expense", auto:true },
 };
 
 function fmtMoney(v) {
@@ -1407,6 +1417,10 @@ async function loadTransactions(month) {
   const data = await api("GET", "/transactions?month="+month);
   if (Array.isArray(data)) transactions = data;
   else loadError = "Não foi possível carregar o financeiro deste mês.";
+  if (paymentsEnabled) {
+    const rec = await api("GET", "/payments/receivable");
+    if (Array.isArray(rec)) receivables = rec;
+  }
   render();
 }
 
@@ -1448,6 +1462,8 @@ function renderFinanceiro() {
     </div>
   </div>
 
+  ${paymentsEnabled ? renderReceivables() : ""}
+
   <!-- Gráfico de barras por categoria -->
   ${renderFinChart(income, expense)}
 
@@ -1458,6 +1474,29 @@ function renderFinanceiro() {
   </div>`;
 
   return html;
+}
+
+// Parcelas a receber de reservas diretas (PMS-007), vencidas primeiro.
+function renderReceivables() {
+  const list = receivables.filter(p => !p.cancelled);
+  if (!list.length) return "";
+  const total = list.reduce((s, p) => s + Number(p.amount), 0);
+  const late = list.filter(p => p.overdue);
+  return `<div style="background:var(--bg1);border:1px solid ${late.length ? "#ef444466" : "var(--bd)"};border-radius:12px;padding:16px;margin-bottom:24px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:11px;color:#f59e0b;font-weight:700;letter-spacing:.1em">A RECEBER${late.length ? ` · <span style="color:#ef4444">${late.length} VENCIDA(S)</span>` : ""}</div>
+      <div style="font-size:13px;font-weight:700;color:#f59e0b">${fmtMoney(total)}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${list.map(p => `<div style="display:flex;gap:10px;padding:7px 10px;background:var(--bg0);border-radius:8px;cursor:pointer;align-items:center"
+          onclick="openEditModal('${esc(p.reservation_id)}')">
+        <div style="font-size:11px;width:78px;color:${p.overdue ? "#ef4444" : "var(--mu)"};font-weight:${p.overdue ? 700 : 400}">${p.overdue ? "🔴 " : ""}${fmtDate(p.due_date)}</div>
+        <div style="flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          ${esc(PAY_KINDS[p.kind] || p.kind)} · Qto ${esc(p.group || p.room_id || "?")} · ${esc(p.guest_name)}</div>
+        <div style="font-size:12px;font-weight:700">${fmtMoney(p.amount)}</div>
+      </div>`).join("")}
+    </div>
+  </div>`;
 }
 
 function renderFinChart(income, expense) {
@@ -1511,13 +1550,16 @@ function renderFinList(type, list) {
       <div style="display:flex;flex-direction:column;gap:6px">
         ${list.map(t => {
           const cat  = FIN_CATEGORIES[t.category] || {label:t.category, icon:"•"};
+          // Pagamentos de reserva (PMS-007) são somente leitura aqui: edita-se na reserva.
+          const click = t.readonly
+            ? (reservations.some(r => r.id === t.reservation_id) ? `onclick="openEditModal('${esc(t.reservation_id)}')"` : "")
+            : `onclick="openTransactionModal('${esc(t.id)}')"`;
           return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;
-            background:var(--bg0);border-radius:8px;cursor:pointer"
-            onclick="openTransactionModal('${t.id}')">
+            background:var(--bg0);border-radius:8px;cursor:pointer" ${click}>
             <span style="font-size:16px">${cat.icon}</span>
             <div style="flex:1;min-width:0">
-              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.description}</div>
-              <div style="font-size:10px;color:var(--mu);margin-top:1px">${cat.label} · ${t.date}</div>
+              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.readonly ? "💳 " : ""}${esc(t.description)}</div>
+              <div style="font-size:10px;color:var(--mu);margin-top:1px">${cat.label} · ${esc(t.date)}${t.readonly ? " · via reserva" : ""}</div>
             </div>
             <div style="font-size:13px;font-weight:700;color:${color};flex-shrink:0">${fmtMoney(t.amount)}</div>
           </div>`;
@@ -2345,8 +2387,112 @@ function openEditModal(id) {
   if (!r) return;
   document.getElementById("modal-title").innerHTML =
     `Editar Reserva <button onclick="closeModal()">×</button>`;
-  document.getElementById("modal-body").innerHTML = reservationForm(r, true);
+  const withPayments = paymentsEnabled && authRole === "admin" && r.source === "direto";
+  document.getElementById("modal-body").innerHTML = reservationForm(r, true) +
+    (withPayments ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "");
   document.getElementById("modal").style.display="flex";
+  if (withPayments) loadPaymentsBox(id);
+}
+
+// ─── Pagamentos da reserva (PMS-007) ──────────────────────────────────────────
+const PAY_KINDS = { sinal: "Sinal", parcela: "Parcela", pagamento: "Pagamento", estorno: "Estorno (devolução)" };
+const PAY_METHODS = { pix: "PIX", dinheiro: "Dinheiro", cartao: "Cartão", transferencia: "Transferência" };
+
+async function loadPaymentsBox(resId) {
+  const box = document.getElementById("pay-box");
+  if (!box) return;
+  const d = await api("GET", `/reservations/${encodeURIComponent(resId)}/payments`);
+  const box2 = document.getElementById("pay-box");
+  if (!box2) return;
+  if (!d || d.error || d._networkError || !d.summary) {
+    box2.innerHTML = `<div style="color:#fca5a5">⚠️ Não foi possível carregar os pagamentos: ${esc(apiErrorMessage(d) || "erro")}</div>`;
+    return;
+  }
+  box2.innerHTML = renderPaymentsBox(d, resId);
+}
+
+function renderPaymentsBox(d, resId) {
+  const s = d.summary;
+  const today = todayStr();
+  const methodOpts = Object.entries(PAY_METHODS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  const rows = (d.payments || []).map(p => {
+    const paid = !!p.paid_at;
+    const late = !paid && p.due_date && p.due_date < today;
+    const status = paid ? `✅ pago ${fmtDate(p.paid_at)} · ${PAY_METHODS[p.method] || p.method || ""}`
+                        : `${late ? "🔴 vencida" : "🕒 vence"} ${fmtDate(p.due_date)}`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--bg0);border-radius:8px;flex-wrap:wrap">
+      <div style="flex:1;min-width:140px"><b style="color:var(--tx)">${esc(PAY_KINDS[p.kind] || p.kind)}</b>
+        <span style="color:${p.kind === "estorno" ? "#ef4444" : "var(--tx)"}"> ${fmtMoney(p.amount)}</span>
+        <div style="font-size:10px;color:${late ? "#ef4444" : "var(--mu)"}">${esc(status)}${p.notes ? " · " + esc(p.notes) : ""}</div></div>
+      ${paid ? "" : `<select id="pm-${esc(p.id)}" style="font-size:11px">${methodOpts}</select>
+        <button class="btn btn-green" style="font-size:11px;padding:4px 8px" onclick="markPaymentPaid('${esc(p.id)}','${esc(resId)}')">Recebido hoje</button>`}
+      <button class="btn" style="font-size:11px;padding:4px 8px" title="Excluir" onclick="deletePayment('${esc(p.id)}','${esc(resId)}')">🗑</button>
+    </div>`;
+  }).join("");
+  const kpi = (label, val, color) => `<div style="flex:1;min-width:90px;background:var(--bg0);border-radius:8px;padding:8px;text-align:center">
+    <div style="font-size:9px;color:var(--mu);letter-spacing:.08em">${label}</div>
+    <div style="font-size:14px;font-weight:700;color:${color}">${fmtMoney(val)}</div></div>`;
+  return `
+    <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:8px">💳 PAGAMENTOS${d.label && d.label !== "" ? " — " + esc(d.label) : ""}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      ${kpi("CONTRATADO", s.contracted, "var(--tx)")}
+      ${kpi("RECEBIDO", s.net, "#22c55e")}
+      ${kpi("SALDO", s.balance, s.balance > 0 ? "#f59e0b" : "#3b82f6")}
+    </div>
+    ${s.contracted === 0 ? `<div style="font-size:11px;color:#f59e0b;margin-bottom:8px">Informe o "Valor Total" da reserva acima e salve para ver o saldo.</div>` : ""}
+    ${s.overdue.length ? `<div style="font-size:11px;color:#ef4444;margin-bottom:8px">🔴 ${s.overdue.length} parcela(s) vencida(s)</div>` : ""}
+    ${s.unscheduled > 0 && (d.payments || []).length ? `<div style="font-size:11px;color:var(--mu);margin-bottom:8px">Sem parcela cadastrada: ${fmtMoney(s.unscheduled)}</div>` : ""}
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rows || `<div style="color:var(--mu)">Nenhum pagamento registrado.</div>`}</div>
+    <div style="background:var(--bg0);border-radius:8px;padding:10px">
+      <div class="row2">
+        <div class="field"><label>Tipo</label><select id="pay-kind">${Object.entries(PAY_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
+        <div class="field"><label>Valor (R$)</label><input type="number" id="pay-amount" min="0" step="0.01" placeholder="0,00"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Situação</label><select id="pay-status">
+          <option value="pago">Já recebido</option><option value="vence">A receber (vencimento)</option></select></div>
+        <div class="field"><label>Data (recebido em / vence em)</label><input type="date" id="pay-date" value="${today}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Forma</label><select id="pay-method">${methodOpts}</select></div>
+        <div class="field"><label>Observação</label><input id="pay-notes" placeholder="Ex: 2ª parcela do contrato"></div>
+      </div>
+      <button class="btn btn-green" style="width:100%" onclick="addPayment('${esc(resId)}')">+ Registrar</button>
+    </div>`;
+}
+
+async function refreshAfterPayment(resId) {
+  await loadPaymentsBox(resId);
+  if (currentView === "financeiro") await loadTransactions(finMonth);
+}
+
+async function addPayment(resId) {
+  const get = i => document.getElementById(i)?.value || "";
+  const scheduled = get("pay-status") === "vence";
+  const body = {
+    kind: get("pay-kind"), amount: parseFloat(get("pay-amount")), notes: get("pay-notes"),
+    ...(scheduled ? { dueDate: get("pay-date") } : { paidAt: get("pay-date"), method: get("pay-method") }),
+  };
+  const r = await api("POST", `/reservations/${encodeURIComponent(resId)}/payments`, body);
+  const err = apiErrorMessage(r);
+  if (err) { alert(err); return; }
+  await refreshAfterPayment(resId);
+}
+
+async function markPaymentPaid(payId, resId) {
+  const method = document.getElementById("pm-" + payId)?.value || "pix";
+  const r = await api("PUT", `/payments/${encodeURIComponent(payId)}`, { paidAt: todayStr(), method });
+  const err = apiErrorMessage(r);
+  if (err) { alert(err); return; }
+  await refreshAfterPayment(resId);
+}
+
+async function deletePayment(payId, resId) {
+  if (!confirm("Excluir este pagamento? Se ele já foi recebido, sai também do Financeiro.")) return;
+  const r = await api("DELETE", `/payments/${encodeURIComponent(payId)}`);
+  const err = apiErrorMessage(r);
+  if (err) { alert(err); return; }
+  await refreshAfterPayment(resId);
 }
 
 function closeModal() {
@@ -2591,11 +2737,15 @@ async function submitForm(id) {
     return;
   }
 
-  // Lançamento automático de receita para reserva direta NOVA, mantido como era,
-  // só que depois da reserva confirmada e vinculado ao id real.
-  // Atenção: valor contratado ainda é lançado como receita; a separação entre
-  // valor contratado e pagamento recebido é o PMS-007.
-  if (form.amount > 0 && form.source === "direto" && !id && authRole === "admin") {
+  // PMS-007 ativo: nada de receita automática. Valor contratado não é dinheiro
+  // recebido (regra 6); abre a reserva para registrar sinal/parcelas.
+  if (paymentsEnabled && form.source === "direto" && !id && authRole === "admin") {
+    await loadAll();
+    openEditModal(linkId);
+    return;
+  }
+  // Modo antigo (antes da migration): lançamento automático como era.
+  if (!paymentsEnabled && form.amount > 0 && form.source === "direto" && !id && authRole === "admin") {
     const tx = await api("POST", "/transactions", {
       id:          genId(),
       type:        "income",

@@ -28,6 +28,16 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
       lt(c, v)  { state.filters.push(r => String(r[c]) < String(v)); return api; },
       gt(c, v)  { state.filters.push(r => String(r[c]) > String(v)); return api; },
       gte(c, v) { state.filters.push(r => String(r[c]) >= String(v)); return api; },
+      lte(c, v) { state.filters.push(r => String(r[c]) <= String(v)); return api; },
+      like(c, pat) {
+        const re = new RegExp("^" + String(pat).split("%").map(x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "s");
+        state.filters.push(r => re.test(String(r[c] ?? ""))); return api;
+      },
+      is(c, v)  { state.filters.push(r => (v === null ? r[c] == null : r[c] === v)); return api; },
+      not(c, op, v) {
+        if (op === "is" && v === null) state.filters.push(r => r[c] != null);
+        return api;
+      },
       order()   { return api; },
       range(a, b) { state.range = [a, b]; return api; },
       limit()   { return api; },
