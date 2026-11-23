@@ -6,7 +6,7 @@
 -- Regras (as mesmas do servidor, lib/availability.js):
 --   * intervalo [check_in, check_out): saída e entrada no mesmo dia NÃO conflitam;
 --   * reservas canceladas não ocupam;
---   * "pending" ocupa (decisão atual; mudar aqui e no servidor juntos);
+--   * "pending" NÃO ocupa (decisão do Paulo, 23/11/2026; mesma regra do servidor);
 --   * bloqueios "Not available" do Airbnb não ocupam (são indisponibilidade
 --     espelhada, não hóspede). No Booking toda linha se chama "CLOSED - Not
 --     available", inclusive reserva real: NÃO são ignoradas;
@@ -32,7 +32,7 @@ begin
   join public.reservations b
     on a.room_id = b.room_id and a.id < b.id
    and a.check_in < b.check_out and b.check_in < a.check_out
-  where coalesce(a.status, 'confirmed') <> 'cancelled' and coalesce(b.status, 'confirmed') <> 'cancelled'
+  where coalesce(a.status, 'confirmed') not in ('cancelled', 'pending') and coalesce(b.status, 'confirmed') not in ('cancelled', 'pending')
     and a.check_out > date '2026-11-24' and b.check_out > date '2026-11-24'
     and not (a.source = 'airbnb' and a.guest_name ~* '(not available|closed|blocked|bloqueado|indispon|unavailable)')
     and not (b.source = 'airbnb' and b.guest_name ~* '(not available|closed|blocked|bloqueado|indispon|unavailable)');
@@ -48,7 +48,7 @@ alter table public.reservations
     daterange(check_in, check_out, '[)') with &&
   )
   where (
-    coalesce(status, 'confirmed') <> 'cancelled'
+    coalesce(status, 'confirmed') not in ('cancelled', 'pending')
     and check_out > date '2026-11-24'
     and not (source = 'airbnb' and guest_name ~* '(not available|closed|blocked|bloqueado|indispon|unavailable)')
   );

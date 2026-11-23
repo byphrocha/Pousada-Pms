@@ -734,13 +734,37 @@ async function saveReservationGroup(rows) {
   return { ok:true, created: rows.map((r, i) => ({ id: ids[i], roomId: r.roomId })) };
 }
 
+// Ocupa o quarto? Cancelada e "pending" não (decisão de 23/11/2026; mesma
+// regra do servidor e do banco).
+const occupies = r => r.status !== "cancelled" && r.status !== "pending";
+
+// Capacidade (decisão de 23/11/2026: só AVISAR, nunca barrar — cama extra,
+// criança de colo etc.). CF = soma dos 9 quartos; 11+12 = soma dos dois.
+function capacityOf(roomId) {
+  if (roomId === "CF") return ROOMS.reduce((s, r) => s + r.cap, 0);
+  const suite = SUITES.find(x => x.id === roomId);
+  if (suite) return suite.cap;
+  const room = ROOMS.find(x => x.id === roomId);
+  return room ? room.cap : null;
+}
+// Pergunta antes de salvar acima da capacidade. Na edição, só se o número de
+// hóspedes AUMENTOU (não insiste a cada salvamento de uma cama extra combinada).
+function confirmCapacity(roomId, adults, children, previous) {
+  const cap = capacityOf(roomId);
+  const n = (Number(adults) || 0) + (Number(children) || 0);
+  if (!cap || n <= cap) return true;
+  if (previous && n <= (Number(previous.adults) || 0) + (Number(previous.children) || 0)) return true;
+  const where = roomId === "CF" ? "a Casa Fechada" : roomId === "11+12" ? "a suíte 11+12" : `o quarto ${roomId}`;
+  return confirm(`Atenção: ${n} hóspedes para ${where}, que comporta ${cap}. Salvar mesmo assim?`);
+}
+
 // Checagem de conflito no navegador para os quartos físicos informados.
 // Serve só para avisar cedo; a garantia real fica no servidor/banco.
 function localConflict(roomIds, checkIn, checkOut, ignoreId) {
   return reservations.find(r =>
     r.id !== ignoreId &&
     roomIds.includes(r.roomId) &&
-    r.status !== "cancelled" &&
+    occupies(r) &&
     r.checkIn < checkOut &&
     r.checkOut > checkIn
   );
@@ -837,7 +861,7 @@ function render() {
 
   // Badge de alerta no botão ⚠️
   if (authRole === "admin") {
-    const confirmed = reservations.filter(r => r.status !== "cancelled");
+    const confirmed = reservations.filter(occupies);
     let alertCount = 0;
     for (let i = 0; i < confirmed.length; i++)
       for (let j = i+1; j < confirmed.length; j++) {
@@ -1657,7 +1681,7 @@ async function deleteTransaction(id) {
 // ─── ALERTAS VIEW ─────────────────────────────────────────────────────────────
 function renderAlertas() {
   // Detecta overbooking: mesma sala, datas sobrepostas, fontes diferentes
-  const confirmed = reservations.filter(r => r.status !== "cancelled");
+  const confirmed = reservations.filter(occupies);
   const conflicts = [];
 
   for (let i = 0; i < confirmed.length; i++) {
@@ -2705,6 +2729,7 @@ async function submitCasaToda() {
   if (!guestName || !checkIn || !checkOut || checkOut <= checkIn) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
+  if (!confirmCapacity("CF", adults, children, null)) return;
 
   const allRooms = ROOMS.map(r => r.id);
   const clash = localConflict(allRooms, checkIn, checkOut, null);
@@ -2774,6 +2799,7 @@ async function submitForm(id) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
   const isComposite = form.roomId === "CF" || form.roomId === "11+12";
+  if (!confirmCapacity(form.roomId, form.adults, form.children, id ? reservations.find(x => x.id === id) : null)) return;
   if (id && isComposite) {
     alert("Para transformar esta reserva em Casa Fechada ou 11+12, cancele-a e crie uma nova.");
     return;

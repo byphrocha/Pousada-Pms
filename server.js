@@ -1582,7 +1582,9 @@ app.get("/calendar/:roomId.ics", trackFeed("legado"), async (req, res) => {
       let query = supabase
         .from("reservations")
         .select("id, room_id, guest_name, check_in, check_out, status, source")
-        .neq("status", "cancelled")
+        // Só confirmadas ocupam (pending não bloqueia: decisão de 23/11/2026),
+        // igual ao feed com token.
+        .eq("status", "confirmed")
         .gte("check_out", cutoff);
       if (roomId !== "all") query = query.eq("room_id", roomId);
       return query.order("check_in").order("id");
