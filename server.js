@@ -7,6 +7,7 @@ const path     = require("path");
 const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
 const { createClient } = require("@supabase/supabase-js");
+const availability = require("./lib/availability");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -22,10 +23,20 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
   console.error("❌ FATAL: SUPABASE_URL e SUPABASE_KEY devem estar definidos.");
   process.exit(1);
 }
-const supabase = createClient(
+let supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
+
+// Checagem de disponibilidade no servidor (PMS-004/005, camada 1):
+//   warn    → só registra no log quando há conflito e grava mesmo assim (padrão)
+//   enforce → recusa com HTTP 409 ROOM_CONFLICT
+//   off     → não checa (comportamento antigo)
+// Começar em "warn" em produção, olhar os logs, e só então passar para "enforce".
+function availabilityMode() {
+  const m = String(process.env.AVAILABILITY_CHECK || "warn").toLowerCase();
+  return ["warn", "enforce", "off"].includes(m) ? m : "warn";
+}
 
 app.use(express.json({ limit: "256kb" })); // previne DoS via payload gigante
 
@@ -40,6 +51,7 @@ function checkLoginRate(ip) {
   return true;
 }
 // Limpa entradas antigas a cada 30 min para não vazar memória
+// (.unref() para não segurar o processo vivo nos testes)
 setInterval(() => {
   const cut = Date.now() - 15 * 60 * 1000;
   for (const [ip, times] of loginAttempts) {
@@ -47,7 +59,7 @@ setInterval(() => {
     if (fresh.length === 0) loginAttempts.delete(ip);
     else loginAttempts.set(ip, fresh);
   }
-}, 30 * 60 * 1000);
+}, 30 * 60 * 1000).unref();
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -355,12 +367,40 @@ function genId() { return crypto.randomBytes(6).toString("hex"); } // 12 chars h
 // Lock para evitar syncs simultâneos (auto-sync + POST /sync)
 let isSyncing = false;
 
-// Valida formato YYYY-MM-DD
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-function isValidDate(s) {
-  if (!DATE_RE.test(s)) return false;
-  const d = new Date(s + "T12:00:00Z");
-  return !isNaN(d.getTime());
+// Valida data de calendário real no formato YYYY-MM-DD (rejeita 2026-02-31 — achado D3)
+const isValidDate = availability.isBusinessDate;
+
+// Consulta reservas que ocupam algum dos quartos no período [checkIn, checkOut).
+// Retorna { conflicts: [{id, room_id}], error }. Só identificadores, nunca dados do hóspede.
+async function checkAvailability({ rooms, checkIn, checkOut, ignoreIds = [] }) {
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("id, room_id, check_in, check_out, status")
+    .in("room_id", rooms)
+    .neq("status", "cancelled")
+    .lt("check_in", checkOut)
+    .gt("check_out", checkIn);
+  if (error) return { conflicts: [], error };
+  return { conflicts: availability.findConflicts(data, { rooms, checkIn, checkOut, ignoreIds }), error: null };
+}
+
+// Aplica o modo configurado. Retorna null para seguir gravando, ou {status, body} para responder.
+async function guardAvailability(stay, contexto) {
+  const mode = availabilityMode();
+  if (mode === "off") return null;
+  const { conflicts, error } = await checkAvailability(stay);
+  if (error) {
+    console.error(`[availability] falha ao consultar disponibilidade (${contexto}): ${error.message || error}`);
+    return mode === "enforce"
+      ? { status: 503, body: { error: { code: "AVAILABILITY_UNKNOWN", message: "Não foi possível verificar a disponibilidade. Nada foi salvo; tente novamente." } } }
+      : null;
+  }
+  if (conflicts.length === 0) return null;
+  const rooms = conflicts.map(c => c.room_id);
+  // Log sem nome/telefone: só quartos, período e ids internos.
+  console.warn(`[availability] conflito (${mode}, ${contexto}) quartos=${[...new Set(rooms)].join(",")} ` +
+               `periodo=${stay.checkIn}..${stay.checkOut} reservas=${conflicts.map(c => c.id).join(",")}`);
+  return mode === "enforce" ? { status: 409, body: availability.conflictError(rooms) } : null;
 }
 
 
@@ -383,6 +423,16 @@ app.post("/reservations", authMiddleware, async (req, res) => {
     return res.status(400).json({ error: "checkIn e checkOut devem estar no formato YYYY-MM-DD" });
   if (b.checkOut <= b.checkIn)
     return res.status(400).json({ error: "checkOut deve ser após checkIn" });
+  // Cada linha de reserva é um quarto físico. CF e 11+12 chegam aqui já
+  // divididos em linhas pelo frontend.
+  if (!availability.isPhysicalRoom(b.roomId))
+    return res.status(400).json({ error: "roomId deve ser um quarto físico (10, 11, 12, 20–25)" });
+  const newStatus = ["confirmed","cancelled","pending"].includes(b.status) ? b.status : "confirmed";
+  if (availability.isBlocking(newStatus)) {
+    const blocked = await guardAvailability(
+      { rooms: [String(b.roomId)], checkIn: b.checkIn, checkOut: b.checkOut }, "POST /reservations");
+    if (blocked) return res.status(blocked.status).json(blocked.body);
+  }
   if (b.externalUid) {
     const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
     if (exists) return res.json({ ok: false, reason: "duplicate" });
@@ -424,6 +474,38 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   if (b.amount    !== undefined) row.amount     = Math.max(0, parseFloat(b.amount) || 0);
   if (b.payment   !== undefined) row.payment    = ["pix","dinheiro","cartao","transferencia"].includes(b.payment) ? b.payment : "pix";
   if (b.status    !== undefined) row.status     = ["confirmed","cancelled","pending"].includes(b.status) ? b.status : "confirmed";
+
+  // Mudança de quarto, datas ou status: valida o resultado final da reserva
+  // (antes o PUT aceitava qualquer data, inclusive saída antes da entrada — D2).
+  const touchesStay = ["room_id","check_in","check_out","status"].some(k => k in row);
+  if (touchesStay) {
+    const { data: current, error: readErr } = await supabase
+      .from("reservations").select("id, room_id, check_in, check_out, status")
+      .eq("id", req.params.id).maybeSingle();
+    if (readErr) return res.status(500).json({ error: readErr.message });
+    if (!current) return res.status(404).json({ error: "Reserva não encontrada" });
+    const next = {
+      room_id:   row.room_id   ?? String(current.room_id),
+      check_in:  row.check_in  ?? String(current.check_in).slice(0, 10),
+      check_out: row.check_out ?? String(current.check_out).slice(0, 10),
+      status:    row.status    ?? current.status,
+    };
+    // Só recusa quando o quarto MUDA para algo inválido; linhas antigas com
+    // room_id fora do padrão continuam editáveis (ver bloco 4 do inventário).
+    if ("room_id" in row && row.room_id !== String(current.room_id) && !availability.isPhysicalRoom(next.room_id))
+      return res.status(400).json({ error: "roomId deve ser um quarto físico (10, 11, 12, 20–25)" });
+    if ("check_in" in row || "check_out" in row) {
+      const invalid = availability.validateStay(next.check_in, next.check_out);
+      if (invalid) return res.status(400).json({ error: invalid });
+    }
+    if (availability.isBlocking(next.status)) {
+      const blocked = await guardAvailability(
+        { rooms: [next.room_id], checkIn: next.check_in, checkOut: next.check_out, ignoreIds: [req.params.id] },
+        "PUT /reservations/:id");
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+    }
+  }
+
   const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -923,7 +1005,10 @@ app.get("*", (req, res) => {
   else res.send("PMS Pousada — servidor OK 🏡");
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+// Exporta o app para os testes; só abre a porta e agenda o sync quando
+// executado diretamente (node server.js / npm start).
+module.exports = { app, _setSupabaseForTests: (client) => { supabase = client; } };
+if (require.main === module) app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ PMS Pousada rodando na porta ${PORT}`);
 
   // ── Auto-sync a cada 15 minutos ──────────────────────────────────────────────
