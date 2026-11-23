@@ -43,6 +43,11 @@ Produção **não** foi alterada.
 | 1 | Sobrepõe mesmo quarto | recusa | recusa (23P01) |
 | 2 | Adjacente | aceita | aceita |
 
+**Ensaio com os dados reais de produção (restaurados no staging e anonimizados, 23/11 ~17h40):**
+1. Aplicar a migration: **falhou com "Ainda há 4 par(es)…"** — os 4 conflitos de dezembro (Airbnb × Booking). Nada foi criado.
+2. Simulando o que o Paulo fará (cancelar no Booking): o lado Booking dos 4 pares foi cancelado no staging.
+3. Aplicar de novo: **constraint criada** sobre as 2.340 reservas reais; nenhuma linha perdida.
+
 **Concorrência:** não executada com duas conexões simultâneas (as ferramentas só permitem uma conexão por vez). A garantia vem do próprio Postgres: constraint de exclusão é verificada no commit e uma segunda transação concorrente espera a primeira e então é recusada. O teste `todo` do Node continua documentando que a camada 1 sozinha não fecha a corrida.
 
 ## 3. Situação de produção (medida em 23/11, só leitura)
