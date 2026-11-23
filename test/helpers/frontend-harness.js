@@ -22,7 +22,7 @@ function anything() {
   });
 }
 
-function loadFrontend({ fields = {}, routes = [] } = {}) {
+function loadFrontend({ fields = {}, routes = [], keep = [] } = {}) {
   const html = fs.readFileSync(path.join(__dirname, "../../build/index.html"), "utf8");
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
   if (scripts.length === 0) throw new Error("Nenhum <script> inline encontrado");
@@ -78,13 +78,12 @@ function loadFrontend({ fields = {}, routes = [] } = {}) {
   for (const s of scripts) vm.runInContext(s, context, { filename: "index.html" });
 
   // Neutraliza o que redesenha a tela; o teste só observa as chamadas de API.
-  vm.runInContext(`
-    loadAll = async () => {};
-    render = () => {};
-    closeModal = () => {};
-    loadTransactions = async () => {};
-    autoSaveGuest = async () => {};
-  `, context);
+  const stubs = {
+    loadAll: "async () => {}", render: "() => {}", closeModal: "() => {}",
+    loadTransactions: "async () => {}", autoSaveGuest: "async () => {}",
+  };
+  vm.runInContext(Object.entries(stubs).filter(([k]) => !keep.includes(k))
+    .map(([k, v]) => `${k} = ${v};`).join("\n"), context);
 
   const run = (code) => vm.runInContext(code, context);
   return { run, calls, alerts, context };
