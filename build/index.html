@@ -2596,6 +2596,16 @@ async function loadPaymentsBox(resId) {
   box2.innerHTML = renderPaymentsBox(d, resId);
 }
 
+// Receita antiga no caixa ligada a esta reserva (lançada antes dos pagamentos).
+// Decisão de 23/11/2026: só avisar, sem converter. Evita contar o valor duas vezes.
+function legacyIncomeWarning(li) {
+  const box = (msg) => `<div style="font-size:11px;color:#f59e0b;background:#f59e0b14;border:1px solid #f59e0b55;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5">${msg}</div>`;
+  if (li === null) return box("⚠️ Não foi possível conferir se há receita antiga desta reserva no Financeiro. Confira antes de registrar pagamento.");
+  if (!li || !li.count) return "";
+  return box(`⚠️ Já existe ${li.count === 1 ? "1 receita lançada" : li.count + " receitas lançadas"} no Financeiro para esta reserva (${fmtMoney(li.total)}), pelo sistema antigo. ` +
+    `Não registre aqui o mesmo valor, senão ele conta duas vezes no caixa.`);
+}
+
 function renderPaymentsBox(d, resId) {
   const s = d.summary;
   const today = todayStr();
@@ -2624,6 +2634,7 @@ function renderPaymentsBox(d, resId) {
       ${kpi("RECEBIDO", s.net, "#22c55e")}
       ${kpi("SALDO", s.balance, s.balance > 0 ? "#f59e0b" : "#3b82f6")}
     </div>
+    ${legacyIncomeWarning(d.legacyIncome)}
     ${s.contracted === 0 ? `<div style="font-size:11px;color:#f59e0b;margin-bottom:8px">Informe o "Valor Total" da reserva acima e salve para ver o saldo.</div>` : ""}
     ${s.overdue.length ? `<div style="font-size:11px;color:#ef4444;margin-bottom:8px">🔴 ${s.overdue.length} parcela(s) vencida(s)</div>` : ""}
     ${s.unscheduled > 0 && (d.payments || []).length ? `<div style="font-size:11px;color:var(--mu);margin-bottom:8px">Sem parcela cadastrada: ${fmtMoney(s.unscheduled)}</div>` : ""}

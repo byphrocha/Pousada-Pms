@@ -1288,8 +1288,19 @@ app.get("/reservations/:id/payments", authMiddleware, adminOnly, requirePayments
   if (error) return res.status(500).json({ error: "Erro ao ler pagamentos" });
   const list = (data || []).sort((a, b) =>
     String(a.paid_at || a.due_date).localeCompare(String(b.paid_at || b.due_date)));
+  // Receita lançada pelo sistema antigo direto no caixa (antes dos pagamentos).
+  // Se existir, registrar pagamento aqui contaria o valor duas vezes: a tela avisa.
+  // Falha na leitura não é silenciosa: vira legacyIncome = null e a tela avisa.
+  const groupIds = [...new Set(c.group.map(r => String(r.id)))];
+  const { data: legacy, error: lErr } = await supabase.from("transactions")
+    .select("amount").eq("type", "income").in("reservation_id", groupIds);
+  const legacyIncome = lErr ? null : {
+    count: (legacy || []).length,
+    total: Math.round((legacy || []).reduce((t, x) => t + Number(x.amount || 0) * 100, 0)) / 100,
+  };
   res.json({
     leadId: c.lead.id,
+    legacyIncome,
     label: groupLabel(c.group, c.lead),
     source: c.lead.source,
     summary: payments.summarize(c.lead.amount, list, todayBrasilia()),
