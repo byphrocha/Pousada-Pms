@@ -268,6 +268,7 @@ input,select,textarea{font-family:'DM Mono',monospace}
       <button class="btn btn-green" onclick="openNewModal()">+ Nova Reserva</button>
     </div>
   </div>
+  <div id="load-banner" role="alert" style="display:none;background:#2b0f0f;border-bottom:1px solid #ef444466;color:#fecaca;padding:10px 16px;font-size:12px;line-height:1.5"></div>
   <div id="content"></div>
 </div>
 
@@ -495,7 +496,15 @@ const BLOCKED_NAMES = [
 // Só filtra bloqueios do Airbnb — no Booking "Closed" pode ser reserva real
 const isAirbnbBlock = r => r.source === "airbnb" && BLOCKED_NAMES.some(p => p.test(r.guestName||""));
 
+// Estado do último carregamento (PMS-012). Quando uma lista falha, a tela
+// mantém o último dado válido e mostra um aviso — antes ela era trocada por []
+// e parecia "sem reservas", induzindo a vender quarto ocupado.
+let loadError    = null;   // texto do problema atual, ou null
+let lastLoadedAt = null;   // Date do último carregamento completo de reservas
+let reservationsLoaded = false;
+
 async function loadAll() {
+  const failed = [];
   try {
     const promises = [
       api("GET","/reservations"),
@@ -506,17 +515,37 @@ async function loadAll() {
       authRole === "admin" ? api("GET","/prereservations") : Promise.resolve(null),
     ];
     const [res, gsts, states, urls, txns, preresvs] = await Promise.all(promises);
-    reservations = Array.isArray(res)
-      ? res.map(normalizeRes).filter(r => !isAirbnbBlock(r))
-      : [];
-    guests        = Array.isArray(gsts) ? gsts : [];
-    cleanedRooms   = new Set(states?.cleaned   || []);
-    checkedInRooms = new Set(states?.checkedIn || []);
-    if (urls)     icalUrls      = urls;
-    if (txns)     transactions  = Array.isArray(txns)     ? txns     : [];
-    if (preresvs) prereservations = Array.isArray(preresvs) ? preresvs : [];
-  } catch(e) { console.error(e); }
+    if (Array.isArray(res)) {
+      reservations = res.map(normalizeRes).filter(r => !isAirbnbBlock(r));
+      reservationsLoaded = true;
+      lastLoadedAt = new Date();
+    } else failed.push("reservas");
+    if (Array.isArray(gsts)) guests = gsts; else failed.push("hóspedes");
+    if (states && Array.isArray(states.cleaned) && Array.isArray(states.checkedIn)) {
+      cleanedRooms   = new Set(states.cleaned);
+      checkedInRooms = new Set(states.checkedIn);
+    } else if (!(states && !states.error && !states._networkError)) failed.push("limpeza/check-in");
+    if (authRole === "admin") {
+      if (urls && !urls.error && !urls._networkError) icalUrls = urls; else failed.push("calendários");
+      if (Array.isArray(txns)) transactions = txns; else failed.push("financeiro");
+      if (Array.isArray(preresvs)) prereservations = preresvs; else failed.push("pré-reservas");
+    }
+  } catch(e) { console.error(e); failed.push("conexão"); }
+  loadError = failed.length ? `Não foi possível atualizar: ${failed.join(", ")}.` : null;
   render();
+}
+
+// Aviso no topo quando os dados podem estar desatualizados ou incompletos.
+function renderLoadBanner() {
+  const el = document.getElementById("load-banner");
+  if (!el) return;
+  if (!loadError) { el.style.display = "none"; el.innerHTML = ""; return; }
+  const when = lastLoadedAt
+    ? `Dados de reservas da última atualização às ${lastLoadedAt.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.`
+    : "As reservas ainda não foram carregadas nesta sessão.";
+  el.innerHTML = `⚠️ <b>${esc(loadError)}</b> ${esc(when)} Não confirme disponibilidade sem atualizar.
+    <button class="btn" style="margin-left:8px;font-size:11px;padding:4px 10px" onclick="loadAll()">Tentar de novo</button>`;
+  el.style.display = "block";
 }
 
 function normalizeRes(r) {
@@ -696,6 +725,7 @@ const SRC_COLOR = {direto:"#8b5cf6",booking:"#0066cc",airbnb:"#ff5a5f"};
 
 // ─── Render engine ────────────────────────────────────────────────────────────
 function render() {
+  renderLoadBanner();
   const titles = {map:"Mapa de Quartos", reservas:"Reservas",
     hospedes:"Hóspedes", financeiro:"Financeiro",
     alertas:"⚠️ Alertas de Overbooking", prereservas:"📝 Pré-reservas & Leads",
@@ -1275,7 +1305,8 @@ function fmtMonthLabel(m) {
 async function loadTransactions(month) {
   if (authRole !== "admin") return;
   const data = await api("GET", "/transactions?month="+month);
-  transactions = Array.isArray(data) ? data : [];
+  if (Array.isArray(data)) transactions = data;
+  else loadError = "Não foi possível carregar o financeiro deste mês.";
   render();
 }
 
