@@ -11,7 +11,7 @@ const jwt = require("jsonwebtoken");
 const { app, _setSupabaseForTests } = require("../server");
 const { createFakeSupabase } = require("./helpers/fake-supabase");
 
-const STAFF = "Bearer " + jwt.sign({ userId: "u2", role: "staff", username: "staff" }, process.env.JWT_SECRET, { algorithm: "HS256" });
+const STAFF = require("./helpers/auth").STAFF();
 
 let server, base;
 test.before(async () => {

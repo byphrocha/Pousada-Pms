@@ -42,8 +42,9 @@ test("JSON malformado → 400, sem derrubar", async () => {
 });
 
 test("exceção dentro de rota async → 500 genérico e o servidor continua", async () => {
-  _setSupabaseForTests({ from() { throw new Error("detalhe interno do banco"); } });
-  const auth = "Bearer " + jwt.sign({ userId: "u1", role: "admin", username: "admin" }, process.env.JWT_SECRET, { algorithm: "HS256" });
+  const real = createFakeSupabase({});
+  _setSupabaseForTests({ from(t) { if (t === "users") return real.from(t); throw new Error("detalhe interno do banco"); } });
+  const auth = require("./helpers/auth").ADMIN();
   const r = await quiet(() => fetch(base + "/guests", { headers: { Authorization: auth } }).then(async x => ({ status: x.status, body: await x.text() })));
   assert.equal(r.status, 500);
   assert.doesNotMatch(r.body, /detalhe interno/);

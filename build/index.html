@@ -492,7 +492,12 @@ async function doChangePassword() {
   if (nw !== nw2)  { alert("As senhas não coincidem"); return; }
   if (nw.length < 6) { alert("Senha deve ter ao menos 6 caracteres"); return; }
   const res = await api("POST", "/change-password", {currentPassword:cur, newPassword:nw});
-  if (res.ok) { alert("Senha alterada com sucesso!"); closeModal(); }
+  if (res.ok) {
+    // O servidor derruba as sessões antigas e devolve um token novo para este aparelho.
+    if (res.token) setAuth(res.token, authRole, authUsername);
+    alert("Senha alterada com sucesso! Os outros aparelhos vão pedir login de novo.");
+    closeModal();
+  }
   else alert(res.error || "Erro ao alterar senha");
 }
 

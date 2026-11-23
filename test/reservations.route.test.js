@@ -11,8 +11,8 @@ const jwt = require("jsonwebtoken");
 const { app, _setSupabaseForTests } = require("../server");
 const { createFakeSupabase } = require("./helpers/fake-supabase");
 
-const ADMIN = "Bearer " + jwt.sign({ userId: "u1", role: "admin", username: "admin" }, process.env.JWT_SECRET, { algorithm: "HS256" });
-const STAFF = "Bearer " + jwt.sign({ userId: "u2", role: "staff", username: "staff" }, process.env.JWT_SECRET, { algorithm: "HS256" });
+const { ADMIN: adminTok, STAFF: staffTok } = require("./helpers/auth");
+const ADMIN = adminTok(), STAFF = staffTok();
 
 let server, base;
 test.before(async () => {
@@ -111,7 +111,7 @@ test("warn (padrão): conflito é registrado no log mas grava como antes", withM
 test("off: não consulta disponibilidade", withMode("off", async () => {
   const db = seed([BUSY]);
   assert.equal((await call("POST", "/reservations", NEW)).status, 200);
-  assert.equal(db.log.filter(l => l.op === "select").length, 0);
+  assert.equal(db.log.filter(l => l.op === "select" && l.table === "reservations").length, 0);
 }));
 
 test("modo inválido na variável cai para warn", withMode("banana", async () => {
@@ -178,7 +178,7 @@ test("enforce: reativar reserva cancelada num período já ocupado → 409", wit
 test("PUT só de observação não consulta disponibilidade", withMode("enforce", async () => {
   const db = seed([MINE]);
   assert.equal((await call("PUT", "/reservations/m1", { notes: "obs" })).status, 200);
-  assert.equal(db.log.filter(l => l.op === "select").length, 0);
+  assert.equal(db.log.filter(l => l.op === "select" && l.table === "reservations").length, 0);
 }));
 
 // ── GET /transactions?reservation_id (usado pela correção F2) ────────────────

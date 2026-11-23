@@ -2,8 +2,12 @@
 // Cada consulta devolve { data, error } como o supabase-js. Sem rede.
 "use strict";
 
+// Sem "users" no estado inicial, entram os usuários fictícios de helpers/auth.js
+// (o servidor valida a sessão no banco). failSelect simula falha de leitura nas
+// tabelas de dados, não na de usuários (senão nenhum pedido autenticado passaria).
 function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, maxRows = 1000 } = {}) {
   const tables = {};
+  if (!("users" in initial)) initial = { ...initial, users: require("./auth").TEST_USERS };
   for (const [t, rows] of Object.entries(initial)) tables[t] = rows.map(r => ({ ...r }));
   const log = []; // operações executadas, para os testes inspecionarem
 
@@ -37,7 +41,7 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
       log.push({ table, op: state.op, payload: state.payload });
       let data;
       if (state.op === "select") {
-        if (failSelect) return { data: null, error: { message: "falha simulada" } };
+        if (failSelect && table !== "users") return { data: null, error: { message: "falha simulada" } };
         data = rows().filter(match).map(r => ({ ...r }));
         if (state.range) data = data.slice(state.range[0], Math.min(state.range[1] + 1, state.range[0] + maxRows));
         else data = data.slice(0, maxRows);

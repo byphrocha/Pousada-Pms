@@ -10,6 +10,7 @@ const { createClient } = require("@supabase/supabase-js");
 const availability = require("./lib/availability");
 const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
+const session = require("./lib/session");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -100,13 +101,48 @@ app.use((req, res, next) => {
 });
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
-function authMiddleware(req, res, next) {
+// PMS-015: o token sozinho não basta. A cada pedido o servidor confere no banco
+// (com cache de 60 s) se o usuário ainda existe, qual é o papel ATUAL dele e se
+// a senha não mudou desde o login. Antes valia o que estava escrito no token por
+// 30 dias: trocar a senha ou rebaixar/remover um usuário não tinha efeito.
+const sessionCache = session.createSessionCache(60 * 1000);
+async function loadSessionUser(userId) {
+  const cached = sessionCache.get(userId);
+  if (cached !== undefined) return cached;
+  const { data, error } = await supabase.from("users")
+    .select("id, username, role, password_hash").eq("id", userId).maybeSingle();
+  if (error) throw new Error("falha ao validar sessão");
+  const user = data && typeof data.password_hash === "string"
+    ? { id: String(data.id), username: data.username, role: data.role, pv: session.passwordFingerprint(data.password_hash) }
+    : null;
+  sessionCache.set(userId, user);
+  return user;
+}
+function signSession(user) {
+  return jwt.sign(
+    { userId: String(user.id), role: user.role, username: user.username, pv: session.passwordFingerprint(user.password_hash) },
+    JWT_SECRET, { expiresIn: "30d", algorithm: "HS256" });
+}
+
+async function authMiddleware(req, res, next) {
   const token = (req.headers.authorization || "").split(" ")[1];
   if (!token) return res.status(401).json({ error: "Não autorizado" });
-  try {
-    req.user = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
-    next();
-  } catch { return res.status(401).json({ error: "Token inválido ou expirado" }); }
+  let payload;
+  try { payload = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }); }
+  catch { return res.status(401).json({ error: "Token inválido ou expirado" }); }
+  if (!payload || (typeof payload.userId !== "string" && typeof payload.userId !== "number") || typeof payload.pv !== "string")
+    return res.status(401).json({ error: "Sessão expirada. Entre de novo." });
+  let user;
+  try { user = await loadSessionUser(String(payload.userId)); }
+  catch {
+    console.error("[auth] não foi possível validar a sessão no banco");
+    return res.status(503).json({ error: "Não foi possível validar a sessão. Tente novamente." });
+  }
+  if (!user || user.pv !== payload.pv)
+    return res.status(401).json({ error: "Sessão expirada. Entre de novo." });
+  // Papel vem do banco, não do token.
+  req.user = { userId: user.id, role: user.role, username: user.username };
+  next();
 }
 
 function adminOnly(req, res, next) {
@@ -129,6 +165,8 @@ function recentFailures(user) {
 }
 setInterval(() => { for (const u of [...loginFailures.keys()]) recentFailures(u); }, 30 * 60 * 1000).unref();
 
+const DUMMY_HASH = bcrypt.hashSync("senha-que-nao-existe-" + crypto.randomBytes(8).toString("hex"), 10);
+
 app.post("/login", async (req, res) => {
   const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
   const ip = String(rawIp).split(",")[0].trim();
@@ -147,14 +185,16 @@ app.post("/login", async (req, res) => {
   };
   const { data: user } = await supabase
     .from("users").select("*").eq("username", uname).maybeSingle();
-  if (!user || typeof user.password_hash !== "string") return fail();
+  if (!user || typeof user.password_hash !== "string") {
+    // Compara com um hash qualquer para gastar o mesmo tempo: sem isso, usuário
+    // inexistente respondia mais rápido e revelava quais contas existem.
+    await bcrypt.compare(password, DUMMY_HASH);
+    return fail();
+  }
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) return fail();
   loginFailures.delete(uname);
-  const token = jwt.sign(
-    { userId: user.id, role: user.role, username: user.username },
-    JWT_SECRET, { expiresIn: "30d", algorithm: "HS256" }
-  );
+  const token = signSession(user);
   res.json({ token, role: user.role, username: user.username });
 });
 
@@ -164,20 +204,37 @@ app.post("/login", async (req, res) => {
 // app.post("/setup-users", async (req, res) => { ... });
 
 // ── Mudar senha ───────────────────────────────────────────────────────────────
+// Trocar a senha derruba as sessões antigas (outros aparelhos entram de novo)
+// e devolve um token novo para este aparelho continuar logado.
+// Erros de senha atual contam no mesmo limite do login: sem isso, um token
+// roubado permitia testar senhas aqui sem limite.
 app.post("/change-password", authMiddleware, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
-  if (!currentPassword || !newPassword)
+  if (typeof currentPassword !== "string" || typeof newPassword !== "string" || !currentPassword || !newPassword)
     return res.status(400).json({ error: "Campos obrigatórios" });
   if (newPassword.length < 6)
     return res.status(400).json({ error: "Nova senha deve ter ao menos 6 caracteres" });
+  // bcrypt ignora o que passa de 72 bytes: senha maior daria falsa sensação de segurança.
+  if (Buffer.byteLength(newPassword, "utf8") > 72 || currentPassword.length > 200)
+    return res.status(400).json({ error: "Nova senha deve ter no máximo 72 caracteres" });
+  const uname = String(req.user.username || "").toLowerCase();
+  if (recentFailures(uname).length >= LOGIN_FAIL_MAX)
+    return res.status(429).json({ error: "Muitas tentativas. Aguarde 15 minutos." });
   const { data: user } = await supabase
-    .from("users").select("*").eq("id", req.user.userId).single();
+    .from("users").select("*").eq("id", req.user.userId).maybeSingle();
   if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
   const valid = await bcrypt.compare(currentPassword, user.password_hash);
-  if (!valid) return res.status(401).json({ error: "Senha atual incorreta" });
+  if (!valid) {
+    loginFailures.set(uname, [...recentFailures(uname), Date.now()]);
+    // 400, não 401: a tela trata 401 como sessão expirada e deslogaria o usuário.
+    return res.status(400).json({ error: "Senha atual incorreta" });
+  }
   const hash = await bcrypt.hash(newPassword, 10);
-  await supabase.from("users").update({ password_hash: hash }).eq("id", user.id);
-  res.json({ ok: true });
+  const { error } = await supabase.from("users").update({ password_hash: hash }).eq("id", user.id);
+  if (error) return res.status(500).json({ error: "Não foi possível trocar a senha. Nada foi alterado." });
+  sessionCache.delete(String(user.id));
+  loginFailures.delete(uname);
+  res.json({ ok: true, token: signSession({ ...user, password_hash: hash }) });
 });
 
 // ── Hóspedes ──────────────────────────────────────────────────────────────────
@@ -1285,8 +1342,9 @@ app.use((err, req, res, next) => {
 // executado diretamente (node server.js / npm start).
 module.exports = {
   app, runSync,
-  _setSupabaseForTests: (client) => { supabase = client; },
+  _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); },
   _resetIcalStateForTests: () => icalMissingCounts.clear(),
+  _resetSessionCacheForTests: () => sessionCache.clear(),
 };
 if (require.main === module) app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ PMS Pousada rodando na porta ${PORT}`);

@@ -143,7 +143,7 @@ test("sem conseguir ler a lista de calendários: não grava status 'em dia'", qu
 }));
 
 // ── Rota GET /sync/status ───────────────────────────────────────────────────
-const STAFF = "Bearer " + jwt.sign({ userId: "u2", role: "staff", username: "staff" }, process.env.JWT_SECRET, { algorithm: "HS256" });
+const STAFF = require("./helpers/auth").STAFF();
 let server, base;
 test.before(async () => { server = app.listen(0); await new Promise(r => server.once("listening", r)); base = `http://127.0.0.1:${server.address().port}`; });
 test.after(() => server.close());

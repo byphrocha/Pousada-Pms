@@ -10,8 +10,7 @@ const jwt = require("jsonwebtoken");
 const { app, _setSupabaseForTests } = require("../server");
 const { createFakeSupabase } = require("./helpers/fake-supabase");
 
-const tok = (role) => "Bearer " + jwt.sign({ userId: role, role, username: role }, process.env.JWT_SECRET, { algorithm: "HS256" });
-const ADMIN = tok("admin"), STAFF = tok("staff");
+const ADMIN = require("./helpers/auth").ADMIN(), STAFF = require("./helpers/auth").STAFF();
 let server, base;
 test.before(async () => { server = app.listen(0); await new Promise(r => server.once("listening", r)); base = `http://127.0.0.1:${server.address().port}`; });
 test.after(() => server.close());
