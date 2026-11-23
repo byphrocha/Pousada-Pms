@@ -375,7 +375,9 @@ const isValidDate = availability.isBusinessDate;
 async function checkAvailability({ rooms, checkIn, checkOut, ignoreIds = [] }) {
   const { data, error } = await supabase
     .from("reservations")
-    .select("id, room_id, check_in, check_out, status")
+    // source e guest_name só servem para reconhecer bloqueios do Airbnb;
+    // nunca são registrados em log nem devolvidos ao cliente.
+    .select("id, room_id, check_in, check_out, status, source, guest_name")
     .in("room_id", rooms)
     .neq("status", "cancelled")
     .lt("check_in", checkOut)

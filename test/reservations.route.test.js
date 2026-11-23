@@ -77,6 +77,11 @@ test("enforce: datas adjacentes (saída = entrada) são aceitas", withMode("enfo
   assert.equal(db.tables.reservations.length, 2);
 }));
 
+test("enforce: bloqueio 'Airbnb (Not available)' de meses não barra reserva direta", withMode("enforce", async () => {
+  seed([{ ...BUSY, source: "airbnb", guest_name: "Airbnb (Not available)", check_in: "2030-01-01", check_out: "2030-06-01" }]);
+  assert.equal((await call("POST", "/reservations", NEW)).status, 200);
+}));
+
 test("enforce: reserva cancelada não ocupa", withMode("enforce", async () => {
   seed([{ ...BUSY, status: "cancelled" }]);
   assert.equal((await call("POST", "/reservations", NEW)).status, 200);
