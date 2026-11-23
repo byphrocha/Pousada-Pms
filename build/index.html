@@ -529,41 +529,94 @@ function normalizeRes(r) {
   };
 }
 
+// Extrai a mensagem de erro de uma resposta da API (formato antigo {error:"..."}
+// ou novo {error:{code,message}}). Retorna null quando a resposta é sucesso.
+function apiErrorMessage(res) {
+  if (!res || res._networkError) return "Erro de conexão. Nada foi salvo; tente novamente.";
+  if (!res.error) return null;
+  if (typeof res.error === "string") return res.error;
+  if (res.error.code === "ROOM_CONFLICT")
+    return `Quarto indisponível no período${res.error.rooms ? " (quarto " + res.error.rooms.join(", ") + ")" : ""}. Nada foi salvo.`;
+  return res.error.message || "Erro ao salvar.";
+}
+
+// Salva (cria ou edita) UMA linha de reserva.
+// Retorna { ok:true, reservation } ou { ok:false, error }. Não recarrega a tela:
+// quem chama decide quando chamar loadAll() (evita recarregar 9x numa Casa Fechada).
 async function saveReservation(form) {
   const isExisting = form.id && reservations.find(r=>r.id===form.id);
   if (isExisting) {
-    await api("PUT",`/reservations/${form.id}`, form);
-    // Se editou valor em reserva direta, cria/atualiza transação
+    const res = await api("PUT",`/reservations/${form.id}`, form);
+    const err = apiErrorMessage(res);
+    if (err) return { ok:false, error: err };
+    // Ajuste de valor em reserva direta: só ATUALIZA o lançamento já vinculado.
+    // Não cria lançamento novo na edição (antes isso duplicava receita — F2).
     if (form.amount > 0 && form.source === "direto" && authRole === "admin") {
-      // Verifica se já existe transação vinculada
-      const existing = transactions.find(t => t.reservation_id === form.id);
+      const linked = await api("GET", "/transactions?reservation_id=" + encodeURIComponent(form.id));
+      const existing = Array.isArray(linked)
+        ? linked.find(t => t.reservation_id === form.id && t.type === "income")
+        : null;
       if (existing) {
-        // Atualiza valor
-        await api("PUT", "/transactions/"+existing.id, {
-          ...existing,
-          amount: form.amount,
-          description: `Reserva Qto ${form.roomId} — ${form.guestName}`,
-        });
-      } else {
-        // Cria nova transação
-        await api("POST", "/transactions", {
-          id:             genId(),
-          type:           "income",
-          category:       "reserva_direta",
-          description:    `Reserva Qto ${form.roomId} — ${form.guestName}`,
-          amount:         form.amount,
-          date:           form.checkIn,
-          month:          form.checkIn.slice(0,7),
-          reservation_id: form.id,
-        });
+        if (Number(existing.amount) !== Number(form.amount)) {
+          await api("PUT", "/transactions/"+existing.id, {
+            ...existing,
+            amount: form.amount,
+            description: `Reserva Qto ${form.roomId} — ${form.guestName}`,
+          });
+        }
+      } else if (Array.isArray(linked) &&
+                 !/\[(Casa toda|Suíte grupo):/.test(form.notes || "")) {
+        // Em CF/11+12 o lançamento fica só na primeira linha; não avisar nas demais.
+        alert("Reserva salva. Não há lançamento financeiro vinculado a ela; " +
+              "se algum valor já foi recebido, registre no Financeiro.");
       }
-      if (finMonth === form.checkIn.slice(0,7)) await loadTransactions(finMonth);
     }
-  } else {
-    const res = await api("POST","/reservations", {...form, id:genId()});
-    if (res.reservation) reservations.push(normalizeRes(res.reservation));
+    return { ok:true };
   }
-  await loadAll();
+  // Nova reserva: mantém o id gerado por quem chamou (antes era trocado aqui,
+  // deixando o lançamento financeiro apontando para um id inexistente — F1).
+  const res = await api("POST","/reservations", {...form, id: form.id || genId()});
+  const err = apiErrorMessage(res);
+  if (err || !res.reservation) return { ok:false, error: err || "Erro ao salvar a reserva." };
+  reservations.push(normalizeRes(res.reservation));
+  return { ok:true, reservation: res.reservation };
+}
+
+// Grava as linhas de uma reserva composta (CF ou 11+12) uma a uma.
+// Se alguma falhar, CANCELA (não apaga) as que já foram criadas, para não deixar
+// a Casa Fechada ou a suíte ocupando só parte dos quartos. Não é atômico de verdade:
+// a garantia de "tudo ou nada" vem com a função no banco (PR 6 da revisão).
+async function saveReservationGroup(rows) {
+  const created = [];
+  for (const row of rows) {
+    const r = await saveReservation(row);
+    if (!r.ok) {
+      const undone = [];
+      for (const c of created) {
+        const u = await api("PUT", `/reservations/${c.id}`, { status: "cancelled" });
+        if (!apiErrorMessage(u)) undone.push(c.roomId);
+      }
+      const notUndone = created.filter(c => !undone.includes(c.roomId)).map(c => c.roomId);
+      let msg = `Não foi possível reservar o quarto ${row.roomId}: ${r.error}`;
+      if (undone.length)    msg += `\nOs quartos ${undone.join(", ")} já criados foram cancelados.`;
+      if (notUndone.length) msg += `\n⚠️ ATENÇÃO: os quartos ${notUndone.join(", ")} ficaram reservados. Cancele-os manualmente.`;
+      return { ok:false, error: msg, created: [] };
+    }
+    created.push({ id: r.reservation.id, roomId: row.roomId });
+  }
+  return { ok:true, created };
+}
+
+// Checagem de conflito no navegador para os quartos físicos informados.
+// Serve só para avisar cedo; a garantia real fica no servidor/banco.
+function localConflict(roomIds, checkIn, checkOut, ignoreId) {
+  return reservations.find(r =>
+    r.id !== ignoreId &&
+    roomIds.includes(r.roomId) &&
+    r.status !== "cancelled" &&
+    r.checkIn < checkOut &&
+    r.checkOut > checkIn
+  );
 }
 
 async function cancelReservation(id) {
@@ -2282,6 +2335,13 @@ async function submitCasaToda() {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
 
+  const allRooms = ROOMS.map(r => r.id);
+  const clash = localConflict(allRooms, checkIn, checkOut, null);
+  if (clash) {
+    alert(`⚠️ Conflito de datas!\nQuarto ${clash.roomId} já tem reserva de ${fmtDate(clash.checkIn)} a ${fmtDate(clash.checkOut)}.\nA Casa Fechada não foi criada.`);
+    return;
+  }
+
   const groupId = genId();
   const suiteGroupId = genId();
 
@@ -2289,20 +2349,24 @@ async function submitCasaToda() {
   const btn = document.querySelector(".modal .btn-green");
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Criando..."; }
 
-  for (const room of ROOMS) {
-    await saveReservation({
-      id:        genId(),
-      roomId:    room.id,
-      guestName,
-      checkIn, checkOut, source, phone,
-      adults:   Math.round(adults / ROOMS.length),
-      children: Math.round(children / ROOMS.length),
-      notes:    notes + ` [Casa toda:${groupId}]`
-        + (room.id==="11"||room.id==="12" ? ` [Suíte grupo:${suiteGroupId}]` : ""),
-      status: "confirmed",
-    });
-  }
+  const result = await saveReservationGroup(ROOMS.map(room => ({
+    id:        genId(),
+    roomId:    room.id,
+    guestName,
+    checkIn, checkOut, source, phone,
+    adults:   Math.round(adults / ROOMS.length),
+    children: Math.round(children / ROOMS.length),
+    notes:    notes + ` [Casa toda:${groupId}]`
+      + (room.id==="11"||room.id==="12" ? ` [Suíte grupo:${suiteGroupId}]` : ""),
+    status: "confirmed",
+  })));
 
+  await loadAll();
+  if (!result.ok) {
+    alert(result.error);
+    if (btn) { btn.disabled = false; btn.textContent = `🏡 Reservar ${ROOMS.length} Quartos`; }
+    return;
+  }
   closeModal();
 }
 
@@ -2336,19 +2400,21 @@ async function submitForm(id) {
   if (!form.guestName||!form.checkIn||!form.checkOut||form.checkOut<=form.checkIn) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
-  // Verifica sobreposição de datas para o quarto (apenas reservas manuais)
-  if (form.roomId !== "CF" && form.roomId !== "11+12") {
-    const conflict = reservations.find(r =>
-      r.id !== form.id &&
-      r.roomId === form.roomId &&
-      r.status !== "cancelled" &&
-      r.checkIn < form.checkOut &&
-      r.checkOut > form.checkIn
-    );
-    if (conflict) {
-      alert(`⚠️ Conflito de datas!\nQuarto ${form.roomId} já tem reserva de ${fmtDate(conflict.checkIn)} a ${fmtDate(conflict.checkOut)} (${conflict.guestName}).`);
-      return;
-    }
+  const isComposite = form.roomId === "CF" || form.roomId === "11+12";
+  if (id && isComposite) {
+    alert("Para transformar esta reserva em Casa Fechada ou 11+12, cancele-a e crie uma nova.");
+    return;
+  }
+  const targetRooms = form.roomId === "CF"    ? ROOMS.map(r => r.id)
+                    : form.roomId === "11+12" ? ["11","12"]
+                    : [form.roomId];
+
+  // Aviso antecipado de conflito, agora também para CF e 11+12 (D4).
+  // A garantia real é do servidor; isto só evita uma ida e volta.
+  const conflict = localConflict(targetRooms, form.checkIn, form.checkOut, form.id);
+  if (conflict) {
+    alert(`⚠️ Conflito de datas!\nQuarto ${conflict.roomId} já tem reserva de ${fmtDate(conflict.checkIn)} a ${fmtDate(conflict.checkOut)} (${conflict.guestName}).`);
+    return;
   }
 
   // Auto-save hóspede apenas para reservas diretas (não iCal)
@@ -2356,49 +2422,52 @@ async function submitForm(id) {
     await autoSaveGuest(form.guestName, get("f-phone"), get("f-email"));
   }
 
-  // Cria transação financeira para reservas diretas (não booking/airbnb)
-  if (form.amount > 0 && form.source === "direto" && !id) {
-    await api("POST", "/transactions", {
+  // Grava a reserva ANTES de qualquer lançamento financeiro (F1/F4).
+  let result, linkId = form.id;
+  if (isComposite) {
+    const tag = form.roomId === "CF" ? "Casa toda" : "Suíte grupo";
+    const groupId = genId();
+    result = await saveReservationGroup(targetRooms.map(rid => ({
+      ...form,
+      id:     genId(),
+      roomId: rid,
+      notes:  (form.notes||"") + ` [${tag}:${groupId}]`,
+    })));
+    // O lançamento aponta para a primeira linha criada do grupo (antes apontava
+    // para um id que nunca existia).
+    if (result.ok) linkId = result.created[0].id;
+  } else {
+    result = await saveReservation(form);
+  }
+
+  if (!result.ok) {
+    await loadAll();
+    alert(result.error);
+    return;
+  }
+
+  // Lançamento automático de receita para reserva direta NOVA, mantido como era,
+  // só que depois da reserva confirmada e vinculado ao id real.
+  // Atenção: valor contratado ainda é lançado como receita; a separação entre
+  // valor contratado e pagamento recebido é o PMS-007.
+  if (form.amount > 0 && form.source === "direto" && !id && authRole === "admin") {
+    const tx = await api("POST", "/transactions", {
       id:          genId(),
       type:        "income",
       category:    "reserva_direta",
-      description: `Reserva Qto ${form.roomId === "CF" ? "Casa Fechada" : form.roomId === "11+12" ? "11+12" : form.roomId} — ${form.guestName}`,
+      description: `Reserva Qto ${form.roomId === "CF" ? "Casa Fechada" : form.roomId} — ${form.guestName}`,
       amount:      form.amount,
       date:        form.checkIn,
       month:       form.checkIn.slice(0,7),
-      reservation_id: form.id,
+      reservation_id: linkId,
     });
+    const txErr = apiErrorMessage(tx);
+    if (txErr) alert("Reserva salva, mas o lançamento financeiro falhou: " + txErr +
+                     "\nRegistre o valor manualmente no Financeiro.");
     if (finMonth === form.checkIn.slice(0,7)) await loadTransactions(finMonth);
   }
 
-  // Casa Fechada → uma reserva por quarto, todas vinculadas com mesmo groupId
-  if (form.roomId==="CF") {
-    const cfGroupId = genId();
-    for (const room of ROOMS) {
-      await saveReservation({
-        ...form,
-        id:     genId(),
-        roomId: room.id,
-        notes:  (form.notes||"") + ` [Casa toda:${cfGroupId}]`,
-      });
-    }
-    closeModal(); return;
-  }
-
-  // Suíte 11+12 → cria duas reservas vinculadas
-  if (form.roomId==="11+12") {
-    const suiteGroupId = genId();
-    for (const rid of ["11","12"]) {
-      await saveReservation({
-        ...form,
-        id:       genId(),
-        roomId:   rid,
-        notes:    (form.notes||"") + ` [Suíte grupo:${suiteGroupId}]`,
-      });
-    }
-  } else {
-    await saveReservation(form);
-  }
+  await loadAll();
   closeModal();
 }
 
