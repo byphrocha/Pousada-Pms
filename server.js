@@ -1021,32 +1021,28 @@ app.get("/proxy-ical", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ── Limpeza de bloqueios iCal ─────────────────────────────────────────────────
+// "Limpar bloqueios": antes APAGAVA fisicamente todos os bloqueios do Airbnb
+// (inclusive futuros e o histórico), sem paginar. Os futuros voltavam na próxima
+// sincronização; o histórico se perdia. Agora só CANCELA bloqueios que já
+// terminaram — nunca apaga — e registra no histórico. A tela já esconde os
+// bloqueios, e a reconciliação cancela sozinha os que somem do Airbnb.
 app.post("/cleanup-blocked", authMiddleware, adminOnly, async (req, res) => {
-  const BLOCKED = [
-    "not available", "blocked", "bloqueado", "unavailable", "indispon",
-    // NÃO inclui "closed" — no Booking.com pode ser reserva real
-  ];
-  // Busca apenas registros do Airbnb
-  const { data, error } = await supabase
-    .from("reservations")
-    .select("id, guest_name, source")
-    .eq("source", "airbnb");
-  if (error) return res.status(500).json({ error: error.message });
-
-  const toDelete = (data||[]).filter(r => {
-    const name = (r.guest_name||"").toLowerCase();
-    return BLOCKED.some(b => name.includes(b));
-  }).map(r => r.id);
-
-  if (toDelete.length === 0) return res.json({ ok: true, deleted: 0 });
-
-  const { error: delErr } = await supabase
-    .from("reservations")
-    .delete()
-    .in("id", toDelete);
-
-  if (delErr) return res.status(500).json({ error: delErr.message });
-  res.json({ ok: true, deleted: toDelete.length });
+  const today = todayBrasilia();
+  const { data, error } = await selectAllPages(() => supabase.from("reservations")
+    .select("id, guest_name, source, status, check_out")
+    .eq("source", "airbnb").neq("status", "cancelled").lt("check_out", today)
+    .order("id"));
+  if (error) return res.status(500).json({ error: "Erro ao buscar bloqueios" });
+  const ids = (data || []).filter(r => availability.isCalendarBlock(r)).map(r => r.id);
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error: upErr } = await supabase.from("reservations").update({ status: "cancelled" }).in("id", ids.slice(i, i + 200));
+    if (upErr) {
+      console.error(`[cleanup] falha ao cancelar bloqueios: ${upErr.code || "erro"}`);
+      return res.status(500).json({ error: "Não foi possível concluir a limpeza", cancelled: i });
+    }
+  }
+  if (ids.length) await audit(req, "bloqueios.limpar", "reservation", null, null, { cancelados: ids.length, ate: today });
+  res.json({ ok: true, cancelled: ids.length, deleted: 0 });
 });
 
 // ── Estados de quarto (limpeza / check-in) ────────────────────────────────────
