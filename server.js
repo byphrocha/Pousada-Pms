@@ -359,6 +359,13 @@ async function fetchUrl(url, depth = 0, allowedHosts = null) {
   });
 }
 
+// Comparação de segredo em tempo constante (não revela o token por tempo de resposta).
+function safeEqual(a, b) {
+  const ha = crypto.createHash("sha256").update(String(a ?? "")).digest();
+  const hb = crypto.createHash("sha256").update(String(b ?? "")).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
 function genId() { return crypto.randomBytes(6).toString("hex"); } // 12 chars hex, criptográfico
 
 // Lock para evitar syncs simultâneos (auto-sync + POST /sync)
@@ -901,7 +908,7 @@ app.delete("/prereservations/:id", authMiddleware, adminOnly, async (req, res) =
 // Segurança via token secreto na URL: /calendar/:token/:roomId.ics
 app.get("/calendar/:token/:roomId.ics", async (req, res) => {
   const CALENDAR_TOKEN = process.env.CALENDAR_TOKEN || "";
-  if (!CALENDAR_TOKEN || req.params.token !== CALENDAR_TOKEN) {
+  if (!CALENDAR_TOKEN || !safeEqual(req.params.token, CALENDAR_TOKEN)) {
     return res.status(403).send("Acesso negado");
   }
 
@@ -948,10 +955,8 @@ app.get("/calendar/:token/:roomId.ics", async (req, res) => {
       const uid  = r.external_uid ? `pms-${r.external_uid}@pousada` : `pms-${r.id}@pousada`;
       const dtstart = r.check_in.replace(/-/g,"");
       const dtend   = r.check_out.replace(/-/g,"");
-      // Anonimiza parcialmente — não vaza nome completo
-      const name = r.guest_name
-        ? r.guest_name.split(" ")[0] + " (reservado)"
-        : "Reservado";
+      // Feed vai para Airbnb/Booking: nenhum dado do hóspede (achado I6).
+      const name = "Reservado";
 
       cal.push(
         "BEGIN:VEVENT",
@@ -973,7 +978,8 @@ app.get("/calendar/:token/:roomId.ics", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store");
     res.send(cal.join("\r\n"));
   } catch(e) {
-    res.status(500).send("Erro: " + e.message);
+    console.error(`[calendar] falha ao gerar feed: ${e.message}`);
+    res.status(500).send("Erro ao gerar calendário");
   }
 });
 
@@ -1050,7 +1056,8 @@ app.get("/calendar/:roomId.ics", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.send(lines.join("\r\n"));
   } catch(e) {
-    res.status(500).send("Erro: " + e.message);
+    console.error(`[calendar] falha ao gerar feed: ${e.message}`);
+    res.status(500).send("Erro ao gerar calendário");
   }
 });
 
