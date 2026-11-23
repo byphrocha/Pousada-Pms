@@ -594,8 +594,14 @@ function syncWarning() {
   if (!h || h.ok) return null;
   if (h.neverRan) return "Os calendários do Airbnb/Booking ainda não foram sincronizados.";
   const parts = [];
-  if (h.failing && h.failing.length)
-    parts.push("Calendário com falha: " + h.failing.map(f => `${feedLabel(f.feed)} (${f.problem})`).join(", ") + ".");
+  const conflicts = (h.failing || []).flatMap(f => (f.conflicts || []).map(c => ({ ...c, feed: f.feed })));
+  if (conflicts.length)
+    parts.push("⛔ Possível overbooking — reserva da plataforma NÃO entrou no PMS porque o quarto já está ocupado: " +
+      conflicts.map(c => `${feedLabel(c.feed).split(" ")[0]} quarto ${c.room}, ${fmtDate(c.checkIn)} → ${fmtDate(c.checkOut)}`).join("; ") +
+      ". Confira na plataforma e resolva.");
+  const otherFailing = (h.failing || []).filter(f => !(f.conflicts || []).length);
+  if (otherFailing.length)
+    parts.push("Calendário com falha: " + otherFailing.map(f => `${feedLabel(f.feed)} (${f.problem})`).join(", ") + ".");
   const stale = (h.stale || []).filter(s => !(h.failing || []).some(f => f.feed === s.feed));
   if (stale.length)
     parts.push("Sem atualizar: " + stale.map(s => `${feedLabel(s.feed)} (${fmtWhen(s.lastSuccessAt)})`).join(", ") + ".");
