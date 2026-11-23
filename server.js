@@ -143,24 +143,35 @@ app.post("/change-password", authMiddleware, async (req, res) => {
 });
 
 // ── Hóspedes ──────────────────────────────────────────────────────────────────
+// CPF de hóspede: só o administrador vê completo. Funcionário vê os 2 últimos
+// dígitos (decisão do Paulo, 23/11/2026). Feito no servidor: esconder na tela
+// não protege, a API devolveria tudo.
+const isAdmin = (req) => req.user?.role === "admin";
+function maskCpf(cpf) {
+  const d = String(cpf || "").replace(/\D/g, "");
+  return d.length >= 2 ? `***.***.***-${d.slice(-2)}` : "";
+}
+const guestForRole = (req, g) => (g && !isAdmin(req) ? { ...g, cpf: maskCpf(g.cpf) } : g);
+const isMasked = (v) => String(v || "").includes("*");
+
 app.get("/guests", authMiddleware, async (req, res) => {
   const q = (req.query.q || "").slice(0, 100); // limite de tamanho
   let query = supabase.from("guests").select("*").order("name");
   if (q.trim()) {
     // Escapa % e _ para evitar wildcard abuse no ilike
     const safe = q.replace(/[%_\\]/g, c => "\\" + c);
-    query = query.or(
-      `name.ilike.%${safe}%,phone.ilike.%${safe}%,cpf.ilike.%${safe}%,email.ilike.%${safe}%`
-    );
+    // Funcionário não busca por CPF (evita descobrir CPF por tentativa).
+    const fields = isAdmin(req) ? ["name", "phone", "cpf", "email"] : ["name", "phone", "email"];
+    query = query.or(fields.map(f => `${f}.ilike.%${safe}%`).join(","));
   }
   const { data, error } = await query.limit(50);
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+  res.json((data || []).map(g => guestForRole(req, g)));
 });
 
 app.get("/guests/:id", authMiddleware, async (req, res) => {
-  const { data } = await supabase.from("guests").select("*").eq("id", req.params.id).single();
-  res.json(data || null);
+  const { data } = await supabase.from("guests").select("*").eq("id", req.params.id).maybeSingle();
+  res.json(guestForRole(req, data) || null);
 });
 
 app.post("/guests", authMiddleware, async (req, res) => {
@@ -176,9 +187,16 @@ app.post("/guests", authMiddleware, async (req, res) => {
     updated_at: new Date().toISOString(),
   };
   if (!g.created_at) g.created_at = new Date().toISOString();
+  // Nunca grava CPF mascarado; funcionário não altera CPF de hóspede existente
+  // (o upsert só atualiza as colunas enviadas, então remover a chave preserva o valor).
+  if (isMasked(g.cpf)) delete g.cpf;
+  if (!isAdmin(req) && "cpf" in g) {
+    const { data: existing } = await supabase.from("guests").select("id").eq("id", g.id).maybeSingle();
+    if (existing) delete g.cpf;
+  }
   const { data, error } = await supabase.from("guests").upsert(g).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json(guestForRole(req, data));
 });
 
 app.put("/guests/:id", authMiddleware, async (req, res) => {
@@ -192,9 +210,10 @@ app.put("/guests/:id", authMiddleware, async (req, res) => {
     notes:      (b.notes   || "").slice(0, 1000),
     updated_at: new Date().toISOString(),
   };
+  if (!isAdmin(req) || isMasked(g.cpf)) delete g.cpf;
   const { data, error } = await supabase.from("guests").update(g).eq("id", req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json(guestForRole(req, data));
 });
 
 // Utilitários iCal
