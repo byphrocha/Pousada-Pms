@@ -71,6 +71,12 @@ const ROTAS = [
   ["PUT",    "/prereservations/p1",         "admin",  { notes: "x" }],
   ["DELETE", "/prereservations/p1",         "admin"],
   ["GET",    "/calendar-urls",              "admin"],
+  ["GET",    "/payments/status",            "admin"],
+  ["GET",    "/reservations/r1/payments",   "admin"],
+  ["POST",   "/reservations/r1/payments",   "admin",  { kind: "sinal", amount: 10, method: "pix", paidAt: "2026-01-01" }],
+  ["PUT",    "/payments/x1",                "admin",  { paidAt: "2026-01-01", method: "pix" }],
+  ["DELETE", "/payments/x1",                "admin"],
+  ["GET",    "/payments/receivable",        "admin"],
   ["POST",   "/login",                      "publica"],
   ["GET",    "/healthz",                    "publica"],
   ["GET",    "/calendar/TOKEN/20.ics",      "publica"],
@@ -79,7 +85,8 @@ const ROTAS = [
 ];
 // Caminho da rota no server.js correspondente a cada linha acima.
 const DECLARADA = (p) => p
-  .replace(/\/g1$/, "/:id").replace(/\/r1$/, "/:id").replace(/\/t1$/, "/:id").replace(/\/p1$/, "/:id")
+  .replace(/\/g1$/, "/:id").replace(/\/r1$/, "/:id").replace(/\/t1$/, "/:id").replace(/\/p1$/, "/:id").replace(/\/x1$/, "/:id")
+  .replace("/reservations/r1/payments", "/reservations/:id/payments")
   .replace("/room-states/20/cleaned", "/room-states/:roomId/:kind")
   .replace("/calendar/TOKEN/20.ics", "/calendar/:token/:roomId.ics")
   .replace("/calendar/20.ics", "/calendar/:roomId.ics");

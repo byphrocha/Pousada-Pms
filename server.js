@@ -11,6 +11,7 @@ const availability = require("./lib/availability");
 const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
 const session = require("./lib/session");
+const payments = require("./lib/payments");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -676,6 +677,9 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
 
   const rows = list.map(buildReservationRow);
   if (!isAdmin(req)) for (const r of rows) { r.amount = 0; r.payment = "pix"; }
+  // F3: o valor do contrato fica só na 1ª linha (antes era copiado nas 9 linhas da CF,
+  // o que multiplicava o valor em qualquer soma). Pagamentos se ligam a essa linha.
+  for (const r of rows.slice(1)) r.amount = 0;
   const { data, error } = await supabase.from("reservations").insert(rows).select();
   if (isOverlapError(error))
     return overlapResponse(res, rooms, { checkIn: first.checkIn, checkOut: first.checkOut }, `POST /reservations/group ${product}`);
@@ -755,6 +759,8 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
 
 app.delete("/reservations/:id", authMiddleware, adminOnly, async (req, res) => {
   const { error } = await supabase.from("reservations").delete().eq("id", req.params.id);
+  if (error && error.code === "23503")
+    return res.status(409).json({ error: "Esta reserva tem pagamentos registrados. Cancele a reserva em vez de apagar." });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
@@ -1114,7 +1120,32 @@ app.get("/transactions", authMiddleware, adminOnly, async (req, res) => {
   if (safeResId) query = query.eq("reservation_id", safeResId);
   const { data, error } = await query.limit(500);
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+  // PMS-007: pagamentos recebidos entram como linhas somente leitura (fonte única:
+  // a tabela payments). Não entram no filtro por reserva (usado só no ajuste antigo).
+  if (safeResId || !(await paymentsEnabled())) return res.json(data || []);
+  let pq = supabase.from("payments").select("*").not("paid_at", "is", null);
+  if (safeMonth) {
+    // Limite superior = 1º dia do mês seguinte ("AAAA-02-31" seria data inválida no Postgres).
+    const [y, m] = safeMonth.split("-").map(Number);
+    const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+    pq = pq.gte("paid_at", `${safeMonth}-01`).lt("paid_at", next);
+  }
+  const { data: pays, error: pErr } = await pq;
+  if (pErr) return res.status(500).json({ error: "Erro ao ler pagamentos" });
+  const ids = [...new Set((pays || []).map(p => p.reservation_id))];
+  let resv = [];
+  if (ids.length) {
+    const r = await supabase.from("reservations").select("id, room_id, guest_name, notes").in("id", ids);
+    if (r.error) return res.status(500).json({ error: "Erro ao ler reservas" });
+    resv = r.data || [];
+  }
+  const byId = new Map(resv.map(r => {
+    const tag = payments.groupTag(r.notes);
+    return [r.id, { ...r, room_label: tag ? (/Casa toda/.test(tag) ? "Casa Fechada" : "11+12") : r.room_id }];
+  }));
+  const virtual = (pays || []).map(p => payments.toFinanceRow(p, byId.get(p.reservation_id)))
+    .filter(t => !safeType || t.type === safeType);
+  res.json([...(data || []), ...virtual].sort((a, b) => String(b.date).localeCompare(String(a.date))));
 });
 
 app.post("/transactions", authMiddleware, adminOnly, async (req, res) => {
@@ -1157,6 +1188,131 @@ app.delete("/transactions/:id", authMiddleware, adminOnly, async (req, res) => {
   const { error } = await supabase.from("transactions").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+// ── Pagamentos de reservas diretas (PMS-007) ─────────────────────────────────
+// Só admin. Ativam sozinhos quando a tabela payments existe (migration
+// 20261123_02); antes disso o PMS funciona como sempre funcionou.
+let paymentsCache = { at: 0, enabled: false };
+async function paymentsEnabled() {
+  if (Date.now() - paymentsCache.at < 60 * 1000) return paymentsCache.enabled;
+  const { error } = await supabase.from("payments").select("id").limit(1);
+  const missing = error && (error.code === "42P01" || error.code === "PGRST205" ||
+    /does not exist|schema cache/i.test(error.message || ""));
+  if (error && !missing) { console.error(`[payments] não foi possível verificar a tabela: ${error.code || error.message}`); return false; }
+  paymentsCache = { at: Date.now(), enabled: !error };
+  return paymentsCache.enabled;
+}
+async function requirePayments(req, res, next) {
+  if (await paymentsEnabled()) return next();
+  res.status(503).json({ error: "Pagamentos ainda não ativados (falta aplicar a migration no banco)." });
+}
+
+// Resolve a linha "dona" do contrato: em CF/11+12 os pagamentos ficam na linha
+// de maior valor do grupo; nas demais, na própria reserva.
+async function resolveContract(reservationId) {
+  const { data: r, error } = await supabase.from("reservations")
+    .select("id, room_id, guest_name, source, status, notes, amount, created_at, check_in, check_out")
+    .eq("id", reservationId).maybeSingle();
+  if (error) return { error: "Erro ao ler a reserva" };
+  if (!r) return { notFound: true };
+  const tag = payments.groupTag(r.notes);
+  if (!tag) return { lead: r, group: [r] };
+  const { data: rows, error: gErr } = await supabase.from("reservations")
+    .select("id, room_id, guest_name, source, status, notes, amount, created_at, check_in, check_out")
+    .like("notes", `%${tag}%`);
+  if (gErr) return { error: "Erro ao ler o grupo da reserva" };
+  const group = (rows || []).filter(x => payments.groupTag(x.notes) === tag);
+  return { lead: payments.pickLead(group.length ? group : [r]), group: group.length ? group : [r] };
+}
+const groupLabel = (group, lead) => (group.length >= 9 ? "Casa Fechada" : group.length === 2 ? "11+12" : String(lead.room_id));
+
+app.get("/payments/status", authMiddleware, adminOnly, async (req, res) => {
+  res.json({ enabled: await paymentsEnabled() });
+});
+
+app.get("/reservations/:id/payments", authMiddleware, adminOnly, requirePayments, async (req, res) => {
+  const c = await resolveContract(req.params.id);
+  if (c.error) return res.status(500).json({ error: c.error });
+  if (c.notFound) return res.status(404).json({ error: "Reserva não encontrada" });
+  const { data, error } = await supabase.from("payments").select("*")
+    .eq("reservation_id", c.lead.id).order("created_at");
+  if (error) return res.status(500).json({ error: "Erro ao ler pagamentos" });
+  const list = (data || []).sort((a, b) =>
+    String(a.paid_at || a.due_date).localeCompare(String(b.paid_at || b.due_date)));
+  res.json({
+    leadId: c.lead.id,
+    label: groupLabel(c.group, c.lead),
+    source: c.lead.source,
+    summary: payments.summarize(c.lead.amount, list, todayBrasilia()),
+    payments: list,
+  });
+});
+
+app.post("/reservations/:id/payments", authMiddleware, adminOnly, requirePayments, async (req, res) => {
+  const c = await resolveContract(req.params.id);
+  if (c.error) return res.status(500).json({ error: c.error });
+  if (c.notFound) return res.status(404).json({ error: "Reserva não encontrada" });
+  if (c.lead.source !== "direto")
+    return res.status(400).json({ error: "Pagamentos só para reservas diretas (Airbnb/Booking: a plataforma cuida)" });
+  const v = payments.validatePayment(req.body, todayBrasilia());
+  if (v.error) return res.status(400).json({ error: v.error });
+  const row = { id: genId(), reservation_id: c.lead.id, ...v.value, created_by: req.user.username || null };
+  const { data, error } = await supabase.from("payments").insert(row).select().single();
+  if (error) {
+    console.error(`[payments] falha ao registrar: ${error.code || error.message}`);
+    return res.status(500).json({ error: "Não foi possível registrar o pagamento. Nada foi salvo." });
+  }
+  res.json({ ok: true, payment: data });
+});
+
+// Editar / marcar como pago. Valida o RESULTADO final, não só o que mudou.
+app.put("/payments/:id", authMiddleware, adminOnly, requirePayments, async (req, res) => {
+  const { data: cur, error: rErr } = await supabase.from("payments").select("*").eq("id", req.params.id).maybeSingle();
+  if (rErr) return res.status(500).json({ error: "Erro ao ler o pagamento" });
+  if (!cur) return res.status(404).json({ error: "Pagamento não encontrado" });
+  const b = req.body || {};
+  const merged = {
+    kind:    b.kind    !== undefined ? b.kind    : cur.kind,
+    amount:  b.amount  !== undefined ? b.amount  : Number(cur.amount),
+    method:  b.method  !== undefined ? b.method  : cur.method,
+    dueDate: b.dueDate !== undefined ? b.dueDate : cur.due_date,
+    paidAt:  b.paidAt  !== undefined ? b.paidAt  : cur.paid_at,
+    notes:   b.notes   !== undefined ? b.notes   : cur.notes,
+  };
+  const v = payments.validatePayment(merged, todayBrasilia());
+  if (v.error) return res.status(400).json({ error: v.error });
+  const { data, error } = await supabase.from("payments").update(v.value).eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: "Não foi possível alterar o pagamento. Nada foi salvo." });
+  res.json({ ok: true, payment: data });
+});
+
+app.delete("/payments/:id", authMiddleware, adminOnly, requirePayments, async (req, res) => {
+  const { error } = await supabase.from("payments").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: "Não foi possível excluir o pagamento" });
+  res.json({ ok: true });
+});
+
+// Parcelas a receber (não pagas), com reserva e quarto, para o Financeiro.
+app.get("/payments/receivable", authMiddleware, adminOnly, requirePayments, async (req, res) => {
+  const { data, error } = await supabase.from("payments").select("*").is("paid_at", null).order("due_date");
+  if (error) return res.status(500).json({ error: "Erro ao ler parcelas a receber" });
+  const ids = [...new Set((data || []).map(p => p.reservation_id))];
+  let resv = [];
+  if (ids.length) {
+    const r = await supabase.from("reservations").select("id, room_id, guest_name, check_in, status, notes").in("id", ids);
+    if (r.error) return res.status(500).json({ error: "Erro ao ler reservas" });
+    resv = r.data || [];
+  }
+  const byId = new Map(resv.map(r => [r.id, r]));
+  const today = todayBrasilia();
+  res.json((data || []).filter(p => p.kind !== "estorno").map(p => {
+    const r = byId.get(p.reservation_id) || {};
+    return { id: p.id, reservation_id: p.reservation_id, kind: p.kind, amount: Number(p.amount), due_date: p.due_date,
+             overdue: !!(p.due_date && p.due_date < today), room_id: r.room_id || null,
+             group: payments.groupTag(r.notes) ? (/Casa toda/.test(payments.groupTag(r.notes)) ? "Casa Fechada" : "11+12") : null,
+             guest_name: r.guest_name || "", check_in: r.check_in || null, cancelled: r.status === "cancelled" };
+  }));
 });
 
 // ── Pré-reservas (leads / interesse de hóspedes) ─────────────────────────────
@@ -1391,7 +1547,7 @@ app.use((err, req, res, next) => {
 // executado diretamente (node server.js / npm start).
 module.exports = {
   app, runSync,
-  _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); },
+  _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); paymentsCache = { at: 0, enabled: false }; },
   _resetIcalStateForTests: () => icalMissingCounts.clear(),
   _resetSessionCacheForTests: () => sessionCache.clear(),
 };
