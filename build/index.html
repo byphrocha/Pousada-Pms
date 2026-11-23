@@ -2388,10 +2388,62 @@ function openEditModal(id) {
   document.getElementById("modal-title").innerHTML =
     `Editar Reserva <button onclick="closeModal()">×</button>`;
   const withPayments = paymentsEnabled && authRole === "admin" && r.source === "direto";
+  const withHistory = authRole === "admin";
   document.getElementById("modal-body").innerHTML = reservationForm(r, true) +
-    (withPayments ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "");
+    (withPayments ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "") +
+    (withHistory ? `<div id="hist-box" style="margin-top:14px;font-size:12px;color:var(--mu)"></div>` : "");
   document.getElementById("modal").style.display="flex";
   if (withPayments) loadPaymentsBox(id);
+  if (withHistory) loadHistoryBox(id);
+}
+
+// ─── Histórico da reserva (PMS-014) ───────────────────────────────────────────
+const AUDIT_ACTIONS = {
+  "reserva.criar": "criou a reserva", "reserva.grupo": "criou a reserva do grupo", "reserva.editar": "editou",
+  "reserva.cancelar": "cancelou", "reserva.reativar": "reativou", "reserva.apagar": "apagou",
+  "pagamento.registrar": "registrou pagamento", "pagamento.receber": "marcou como recebido",
+  "pagamento.editar": "alterou pagamento", "pagamento.excluir": "excluiu pagamento",
+};
+const AUDIT_FIELDS = {
+  room_id: "quarto", check_in: "entrada", check_out: "saída", status: "status", source: "canal",
+  amount: "valor", payment: "forma", adults: "adultos", children: "crianças",
+  kind: "tipo", method: "forma", due_date: "vencimento", paid_at: "pago em", produto: "produto", quartos: "quartos",
+};
+function auditValue(field, v) {
+  if (v === null || v === undefined) return "—";
+  if (["amount"].includes(field)) return fmtMoney(v);
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtDate(v);
+  if (Array.isArray(v)) return v.join(", ");
+  return String(v);
+}
+function describeAuditChanges(ch) {
+  const parts = [];
+  for (const [k, v] of Object.entries(ch || {})) {
+    if (k === "privados") { parts.push(`alterou ${v.join(", ")}`); continue; }
+    const label = AUDIT_FIELDS[k] || k;
+    if (Array.isArray(v) && v.length === 2 && !["quartos"].includes(k)) parts.push(`${label}: ${auditValue(k, v[0])} → ${auditValue(k, v[1])}`);
+    else parts.push(`${label}: ${auditValue(k, v)}`);
+  }
+  return parts.join(" · ");
+}
+async function loadHistoryBox(resId) {
+  const d = await api("GET", `/reservations/${encodeURIComponent(resId)}/history`);
+  const box = document.getElementById("hist-box");
+  if (!box || !d || !d.enabled || !Array.isArray(d.items)) return;
+  box.innerHTML = renderHistoryBox(d.items);
+}
+function renderHistoryBox(items) {
+  if (!items.length) return `<div style="font-size:11px;color:var(--mu)">🕘 Sem alterações registradas.</div>`;
+  return `<details><summary style="cursor:pointer;font-size:11px;font-weight:700;letter-spacing:.1em">🕘 HISTÓRICO (${items.length})</summary>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px">
+      ${items.map(it => {
+        const when = new Date(it.at);
+        const ts = isNaN(when) ? "" : when.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        return `<div style="font-size:11px;padding:5px 8px;background:var(--bg0);border-radius:6px">
+          <b style="color:var(--tx)">${esc(ts)}</b> · ${esc(it.username || "?")} ${esc(AUDIT_ACTIONS[it.action] || it.action)}
+          <div style="color:var(--mu)">${esc(describeAuditChanges(it.changes))}</div></div>`;
+      }).join("")}
+    </div></details>`;
 }
 
 // ─── Pagamentos da reserva (PMS-007) ──────────────────────────────────────────

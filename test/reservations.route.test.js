@@ -178,7 +178,8 @@ test("enforce: reativar reserva cancelada num período já ocupado → 409", wit
 test("PUT só de observação não consulta disponibilidade", withMode("enforce", async () => {
   const db = seed([MINE]);
   assert.equal((await call("PUT", "/reservations/m1", { notes: "obs" })).status, 200);
-  assert.equal(db.log.filter(l => l.op === "select" && l.table === "reservations").length, 0);
+  // A consulta de disponibilidade é a que lê source/guest_name para reconhecer bloqueios.
+  assert.equal(db.log.filter(l => l.op === "select" && l.table === "reservations" && /guest_name/.test(l.columns || "")).length, 0);
 }));
 
 // ── GET /transactions?reservation_id (usado pela correção F2) ────────────────

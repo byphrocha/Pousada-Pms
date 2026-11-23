@@ -53,7 +53,7 @@ test("CF: grava as 9 linhas numa única operação de insert", async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.product, "CF");
   assert.equal(db.tables.reservations.length, 9);
-  const inserts = db.log.filter(l => l.op === "insert");
+  const inserts = db.log.filter(l => l.op === "insert" && l.table === "reservations");
   assert.equal(inserts.length, 1, "um INSERT só");
   assert.equal(inserts[0].payload.length, 9);
   assert.deepEqual(r.body.reservations.map(x => x.id), rowsFor(ALL).map(x => x.id), "mesma ordem do pedido");

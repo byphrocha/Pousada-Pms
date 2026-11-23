@@ -12,6 +12,7 @@ const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
 const session = require("./lib/session");
 const payments = require("./lib/payments");
+const auditLib = require("./lib/audit");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -606,6 +607,7 @@ app.post("/reservations", authMiddleware, async (req, res) => {
   if (isOverlapError(error))
     return overlapResponse(res, [row.room_id], { checkIn: row.check_in, checkOut: row.check_out }, "POST /reservations");
   if (error) return res.status(500).json({ error: error.message });
+  await audit(req, "reserva.criar", "reservation", row.id, row.id, auditLib.snapshot(row));
   res.json({ ok: true, reservation: reservationForRole(req, data) });
 });
 
@@ -687,6 +689,8 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
     console.error(`[reservations/group] falha ao gravar ${product}: ${error.message || error}`);
     return res.status(500).json({ error: "Não foi possível gravar a reserva. Nada foi salvo; tente novamente." });
   }
+  await audit(req, "reserva.grupo", "reservation", rows[0].id, rows[0].id,
+    { produto: product, quartos: rooms, ...auditLib.snapshot(rows[0], ["check_in", "check_out", "status", "source", "amount"]) });
   // Devolve na mesma ordem em que o cliente mandou (o 1º id recebe o lançamento financeiro).
   const byId = new Map((data || []).map(r => [String(r.id), r]));
   res.json({ ok: true, product, reservations: rows.map(r => reservationForRole(req, byId.get(String(r.id)) || r)) });
@@ -710,6 +714,12 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   // Funcionário: valor e pagamento são ignorados (a tela dele nem mostra os campos;
   // ignorar em vez de recusar evita apagar o valor quando o formulário vem sem ele).
   if (!isAdmin(req)) for (const k of MONEY_FIELDS) delete row[k];
+
+  // Estado anterior para a auditoria (só se ela estiver ativa; nada pessoal é gravado).
+  const auditOn = await tableEnabled("audit_log");
+  const before = auditOn
+    ? (await supabase.from("reservations").select("*").eq("id", req.params.id).maybeSingle()).data
+    : null;
 
   // Mudança de quarto, datas ou status: valida o resultado final da reserva
   // (antes o PUT aceitava qualquer data, inclusive saída antes da entrada — D2).
@@ -754,14 +764,23 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
     } : null, "PUT /reservations/:id");
   }
   if (error) return res.status(500).json({ error: error.message });
+  if (auditOn && before) {
+    const changes = auditLib.diff(before, row);
+    if (Object.keys(changes).length)
+      await audit(req, auditLib.reservationAction(changes), "reservation", req.params.id, req.params.id, changes);
+  }
   res.json({ ok: true });
 });
 
 app.delete("/reservations/:id", authMiddleware, adminOnly, async (req, res) => {
+  const before = (await tableEnabled("audit_log"))
+    ? (await supabase.from("reservations").select("*").eq("id", req.params.id).maybeSingle()).data
+    : null;
   const { error } = await supabase.from("reservations").delete().eq("id", req.params.id);
   if (error && error.code === "23503")
     return res.status(409).json({ error: "Esta reserva tem pagamentos registrados. Cancele a reserva em vez de apagar." });
   if (error) return res.status(500).json({ error: error.message });
+  if (before) await audit(req, "reserva.apagar", "reservation", req.params.id, req.params.id, auditLib.snapshot(before));
   res.json({ ok: true });
 });
 
@@ -1193,15 +1212,33 @@ app.delete("/transactions/:id", authMiddleware, adminOnly, async (req, res) => {
 // ── Pagamentos de reservas diretas (PMS-007) ─────────────────────────────────
 // Só admin. Ativam sozinhos quando a tabela payments existe (migration
 // 20261123_02); antes disso o PMS funciona como sempre funcionou.
-let paymentsCache = { at: 0, enabled: false };
-async function paymentsEnabled() {
-  if (Date.now() - paymentsCache.at < 60 * 1000) return paymentsCache.enabled;
-  const { error } = await supabase.from("payments").select("id").limit(1);
+// Tabelas novas (payments, audit_log) se ativam sozinhas quando a migration é
+// aplicada: o servidor confere se existem (cache de 60 s).
+let tableCache = new Map();
+async function tableEnabled(name) {
+  const hit = tableCache.get(name);
+  if (hit && Date.now() - hit.at < 60 * 1000) return hit.enabled;
+  const { error } = await supabase.from(name).select("id").limit(1);
   const missing = error && (error.code === "42P01" || error.code === "PGRST205" ||
     /does not exist|schema cache/i.test(error.message || ""));
-  if (error && !missing) { console.error(`[payments] não foi possível verificar a tabela: ${error.code || error.message}`); return false; }
-  paymentsCache = { at: Date.now(), enabled: !error };
-  return paymentsCache.enabled;
+  if (error && !missing) { console.error(`[${name}] não foi possível verificar a tabela: ${error.code || error.message}`); return false; }
+  tableCache.set(name, { at: Date.now(), enabled: !error });
+  return !error;
+}
+const paymentsEnabled = () => tableEnabled("payments");
+
+// Auditoria (PMS-014): registra depois do sucesso; falhar aqui NUNCA desfaz nem
+// impede a operação, só vai para o log (sem dados pessoais).
+async function audit(req, action, entity, entityId, reservationId, changes) {
+  try {
+    if (!(await tableEnabled("audit_log"))) return;
+    const { error } = await supabase.from("audit_log").insert({
+      user_id: req.user?.userId || null, username: req.user?.username || null, role: req.user?.role || null,
+      action, entity, entity_id: entityId ? String(entityId) : null,
+      reservation_id: reservationId ? String(reservationId) : null, changes: changes || {},
+    });
+    if (error) console.error(`[audit] falha ao registrar ${action}: ${error.code || "erro"}`);
+  } catch { console.error(`[audit] falha ao registrar ${action}`); }
 }
 async function requirePayments(req, res, next) {
   if (await paymentsEnabled()) return next();
@@ -1226,6 +1263,19 @@ async function resolveContract(reservationId) {
   return { lead: payments.pickLead(group.length ? group : [r]), group: group.length ? group : [r] };
 }
 const groupLabel = (group, lead) => (group.length >= 9 ? "Casa Fechada" : group.length === 2 ? "11+12" : String(lead.room_id));
+
+// Histórico da reserva (e do grupo CF/11+12 e dos pagamentos), só admin.
+app.get("/reservations/:id/history", authMiddleware, adminOnly, async (req, res) => {
+  if (!(await tableEnabled("audit_log"))) return res.json({ enabled: false, items: [] });
+  const c = await resolveContract(req.params.id);
+  if (c.error) return res.status(500).json({ error: c.error });
+  if (c.notFound) return res.status(404).json({ error: "Reserva não encontrada" });
+  const ids = [...new Set([req.params.id, ...c.group.map(r => String(r.id))])];
+  const { data, error } = await supabase.from("audit_log").select("at, username, role, action, entity, entity_id, changes")
+    .in("reservation_id", ids).order("at", { ascending: false }).limit(100);
+  if (error) return res.status(500).json({ error: "Erro ao ler o histórico" });
+  res.json({ enabled: true, items: data || [] });
+});
 
 app.get("/payments/status", authMiddleware, adminOnly, async (req, res) => {
   res.json({ enabled: await paymentsEnabled() });
@@ -1263,6 +1313,7 @@ app.post("/reservations/:id/payments", authMiddleware, adminOnly, requirePayment
     console.error(`[payments] falha ao registrar: ${error.code || error.message}`);
     return res.status(500).json({ error: "Não foi possível registrar o pagamento. Nada foi salvo." });
   }
+  await audit(req, "pagamento.registrar", "payment", row.id, c.lead.id, auditLib.snapshot(v.value, auditLib.PAYMENT_FIELDS));
   res.json({ ok: true, payment: data });
 });
 
@@ -1284,12 +1335,18 @@ app.put("/payments/:id", authMiddleware, adminOnly, requirePayments, async (req,
   if (v.error) return res.status(400).json({ error: v.error });
   const { data, error } = await supabase.from("payments").update(v.value).eq("id", req.params.id).select().single();
   if (error) return res.status(500).json({ error: "Não foi possível alterar o pagamento. Nada foi salvo." });
+  const pChanges = auditLib.diff(cur, v.value, auditLib.PAYMENT_FIELDS);
+  if (Object.keys(pChanges).length)
+    await audit(req, pChanges.paid_at && !pChanges.paid_at[0] ? "pagamento.receber" : "pagamento.editar",
+                "payment", req.params.id, cur.reservation_id, pChanges);
   res.json({ ok: true, payment: data });
 });
 
 app.delete("/payments/:id", authMiddleware, adminOnly, requirePayments, async (req, res) => {
+  const { data: cur } = await supabase.from("payments").select("*").eq("id", req.params.id).maybeSingle();
   const { error } = await supabase.from("payments").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: "Não foi possível excluir o pagamento" });
+  if (cur) await audit(req, "pagamento.excluir", "payment", req.params.id, cur.reservation_id, auditLib.snapshot(cur, auditLib.PAYMENT_FIELDS));
   res.json({ ok: true });
 });
 
@@ -1547,7 +1604,7 @@ app.use((err, req, res, next) => {
 // executado diretamente (node server.js / npm start).
 module.exports = {
   app, runSync,
-  _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); paymentsCache = { at: 0, enabled: false }; },
+  _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); tableCache = new Map(); },
   _resetIcalStateForTests: () => icalMissingCounts.clear(),
   _resetSessionCacheForTests: () => sessionCache.clear(),
 };
