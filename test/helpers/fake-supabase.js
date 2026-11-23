@@ -51,6 +51,14 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
       } else if (state.op === "update") {
         data = [];
         for (const r of rows()) if (match(r)) { Object.assign(r, state.payload); data.push({ ...r }); }
+      } else if (state.op === "upsert") {
+        const list = Array.isArray(state.payload) ? state.payload : [state.payload];
+        data = [];
+        for (const r of list) {
+          const cur = rows().find(x => x.id === r.id);
+          if (cur) Object.assign(cur, r); else rows().push({ ...r });
+          data.push({ ...(cur || r) });
+        }
       } else if (state.op === "delete") {
         data = rows().filter(match);
         tables[table] = rows().filter(r => !match(r));

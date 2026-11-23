@@ -1226,7 +1226,8 @@ function openGuestModal(guestId) {
       </div>
       <div class="row2">
         <div class="field"><label>CPF / Documento</label>
-          <input id="g-cpf" value="${esc(g.cpf||"")}" placeholder="000.000.000-00"></div>
+          <input id="g-cpf" value="${esc(g.cpf||"")}" placeholder="000.000.000-00"
+            ${String(g.cpf||"").includes("*") ? 'readonly title="CPF visível só para o administrador"' : ""}></div>
         <div class="field"><label>Endereço / Cidade</label>
           <input id="g-address" value="${esc(g.address||"")}" placeholder="Cidade, Estado"></div>
       </div>
