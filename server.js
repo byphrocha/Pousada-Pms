@@ -407,10 +407,27 @@ async function guardAvailability(stay, contexto) {
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
 // ── Reservas ──────────────────────────────────────────────────────────────────
+// O Supabase/PostgREST devolve no máximo 1.000 linhas por consulta. Com mais
+// reservas que isso, a tela recebia só as mais antigas e mostrava os quartos
+// livres. Esta função busca todas as páginas.
+const PAGE_SIZE = 1000;
+async function selectAllPages(buildQuery) {
+  const all = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) return { data: null, error };
+    all.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) return { data: all, error: null };
+  }
+}
+
 app.get("/reservations", authMiddleware, async (req, res) => {
-  const { data, error } = await supabase.from("reservations").select("*").order("check_in");
+  const { data, error } = await selectAllPages(() =>
+    supabase.from("reservations").select("*").order("check_in").order("id"));
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  // Bloqueios "Not available" do Airbnb: a tela já os descartava (isAirbnbBlock);
+  // filtrar aqui reduz a resposta sem mudar o que é exibido.
+  res.json(data.filter(r => !availability.isCalendarBlock(r)));
 });
 
 app.post("/reservations", authMiddleware, async (req, res) => {
@@ -623,10 +640,10 @@ async function runSync({ fetcher = fetchUrl } = {}) {
 
         // ── RECONCILIAÇÃO: datas alteradas e reservas que sumiram do feed ───
         if (mode !== "off") {
-          const { data: rows, error: rowsErr } = await supabase.from("reservations")
+          const { data: rows, error: rowsErr } = await selectAllPages(() => supabase.from("reservations")
             .select("id, room_id, external_uid, check_in, check_out, notes")
             .eq("source", source).eq("status", "confirmed")
-            .in("room_id", targetRooms).gte("check_out", today);
+            .in("room_id", targetRooms).gte("check_out", today).order("id"));
           if (rowsErr) throw new Error("falha ao ler reservas para reconciliar");
           const plan = icalReconcile.planReconcile({
             source, feedRoomId: roomId, events: evts, rows, today, missingCounts: icalMissingCounts,
