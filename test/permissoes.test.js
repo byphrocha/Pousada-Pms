@@ -71,6 +71,7 @@ const ROTAS = [
   ["PUT",    "/prereservations/p1",         "admin",  { notes: "x" }],
   ["DELETE", "/prereservations/p1",         "admin"],
   ["GET",    "/calendar-urls",              "admin"],
+  ["GET",    "/calendar/inventory",         "admin"],
   ["GET",    "/payments/status",            "admin"],
   ["GET",    "/reservations/r1/history",    "admin"],
   ["GET",    "/reservations/r1/payments",   "admin"],
