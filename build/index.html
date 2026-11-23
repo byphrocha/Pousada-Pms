@@ -1099,7 +1099,7 @@ function renderMap() {
       <div class="room-icon">${s.icon}</div>
       <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
       <div class="room-climate" style="color:${s.color}">${room.climate==="AC"?"❄ AC":"💨 Vent."}</div>
-      ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${res.guestName}</div>`:""}
+      ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(res.guestName)}</div>`:""}
       ${st==="checkin"?`<button class="clean-btn" style="background:#1e3a5f;color:#3b82f6;border-color:#3b82f644" onclick="markCheckedIn('${room.id}',event)">✓ Check-in</button>`:""}
       ${showCleanBtn?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
     </div>`;
