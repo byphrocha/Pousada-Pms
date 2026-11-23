@@ -535,6 +535,20 @@ async function guardAvailability(stay, contexto) {
 }
 
 
+// O banco recusa sobreposição (constraint reservations_no_overlap, código 23P01).
+// Isso fecha a corrida entre dois pedidos simultâneos que a checagem acima não fecha.
+const isOverlapError = (err) => !!err && err.code === "23P01";
+async function overlapResponse(res, rooms, stay, contexto) {
+  // Descobre quais quartos colidiram (só ids e quartos; nada sobre o outro hóspede).
+  let hit = rooms;
+  if (stay) {
+    const { conflicts } = await checkAvailability({ rooms, checkIn: stay.checkIn, checkOut: stay.checkOut, ignoreIds: stay.ignoreIds || [] });
+    if (conflicts.length) hit = conflicts.map(c => c.room_id);
+  }
+  console.warn(`[availability] banco recusou sobreposição (${contexto}) quartos=${[...new Set(hit)].join(",")}`);
+  return res.status(409).json(availability.conflictError(hit));
+}
+
 // Health check
 app.get("/healthz", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
@@ -588,6 +602,8 @@ app.post("/reservations", authMiddleware, async (req, res) => {
   const row = buildReservationRow(b);
   if (!isAdmin(req)) { row.amount = 0; row.payment = "pix"; } // valor fica para o admin lançar
   const { data, error } = await supabase.from("reservations").insert(row).select().single();
+  if (isOverlapError(error))
+    return overlapResponse(res, [row.room_id], { checkIn: row.check_in, checkOut: row.check_out }, "POST /reservations");
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true, reservation: reservationForRole(req, data) });
 });
@@ -661,6 +677,8 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
   const rows = list.map(buildReservationRow);
   if (!isAdmin(req)) for (const r of rows) { r.amount = 0; r.payment = "pix"; }
   const { data, error } = await supabase.from("reservations").insert(rows).select();
+  if (isOverlapError(error))
+    return overlapResponse(res, rooms, { checkIn: first.checkIn, checkOut: first.checkOut }, `POST /reservations/group ${product}`);
   if (error) {
     console.error(`[reservations/group] falha ao gravar ${product}: ${error.message || error}`);
     return res.status(500).json({ error: "Não foi possível gravar a reserva. Nada foi salvo; tente novamente." });
@@ -721,6 +739,16 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   }
 
   const { error } = await supabase.from("reservations").update(row).eq("id", req.params.id);
+  if (isOverlapError(error)) {
+    const { data: cur } = await supabase.from("reservations").select("room_id, check_in, check_out")
+      .eq("id", req.params.id).maybeSingle();
+    const room = row.room_id ?? (cur && String(cur.room_id));
+    return overlapResponse(res, room ? [room] : [], room ? {
+      checkIn: row.check_in ?? String(cur.check_in).slice(0, 10),
+      checkOut: row.check_out ?? String(cur.check_out).slice(0, 10),
+      ignoreIds: [req.params.id],
+    } : null, "PUT /reservations/:id");
+  }
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
@@ -797,7 +825,7 @@ async function runSync({ fetcher = fetchUrl } = {}) {
     for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
       log.push(`🔍 ${source} — Quarto ${roomId}`);
-      const feed = { key: `${source}/${roomId}`, ok: false, problem: null, events: 0 };
+      const feed = { key: `${source}/${roomId}`, ok: false, problem: null, events: 0, conflicts: [] };
       feedResults.push(feed);
       const failedBefore = failed;
       try {
@@ -839,6 +867,10 @@ async function runSync({ fetcher = fetchUrl } = {}) {
             if (insErr) {
               // Antes o erro era ignorado em silêncio (achado I3).
               failed++;
+              // Recusa do banco por sobreposição: a plataforma vendeu datas já ocupadas
+              // (overbooking real). A reserva NÃO entra no PMS, então precisa aparecer
+              // no aviso da tela com quarto e datas para alguém resolver.
+              if (isOverlapError(insErr)) feed.conflicts.push({ room: targetRoom, checkIn: ev.checkIn, checkOut: ev.checkOut });
               console.error(`[runSync] Falha ao importar ${source}/${roomId} quarto=${targetRoom} ` +
                             `periodo=${ev.checkIn}..${ev.checkOut}: ${insErr.code || insErr.message || "erro"}`);
               log.push(`   ✗ Não importado: Qto ${targetRoom} (${ev.checkIn} → ${ev.checkOut})`);
@@ -887,7 +919,8 @@ async function runSync({ fetcher = fetchUrl } = {}) {
             }
           }
         }
-        if (failed > failedBefore) feed.problem = "falha ao gravar";
+        if (feed.conflicts.length) feed.problem = "conflito com outra reserva";
+        else if (failed > failedBefore) feed.problem = "falha ao gravar";
         else feed.ok = true;
       } catch(e) {
         feed.problem = syncStatus.classifyError(e);

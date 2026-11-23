@@ -34,7 +34,7 @@ test("mergeStatus: falha mantém o último sucesso anterior; calendário removid
   assert.equal(s1.lastRunOk, true);
   const T1 = "2030-01-10T12:15:00.000Z";
   const s2 = S.mergeStatus(s1, { feeds: [{ key: "airbnb/21", ok: false, problem: "HTTP 503" }] }, T1);
-  assert.deepEqual(s2.feeds["airbnb/21"], { lastAttemptAt: T1, lastSuccessAt: T0, problem: "HTTP 503", events: 3 });
+  assert.deepEqual(s2.feeds["airbnb/21"], { lastAttemptAt: T1, lastSuccessAt: T0, problem: "HTTP 503", events: 3, conflicts: [] });
   assert.equal(s2.feeds["booking/20"], undefined, "não configurado mais");
   assert.equal(s2.lastRunOk, false);
 });
@@ -51,7 +51,7 @@ test("computeHealth: em dia, com falha, atrasado e nunca rodou", () => {
   const bad = S.mergeStatus(ok, { feeds: [{ key: "airbnb/21", ok: false, problem: "HTTP 404" }] }, T0);
   const h = S.computeHealth(bad, ms(T0) + 1 * MIN);
   assert.equal(h.ok, false);
-  assert.deepEqual(h.failing, [{ feed: "airbnb/21", problem: "HTTP 404", lastSuccessAt: T0 }]);
+  assert.deepEqual(h.failing, [{ feed: "airbnb/21", problem: "HTTP 404", lastSuccessAt: T0, conflicts: [] }]);
 
   assert.equal(S.computeHealth(null, ms(T0)).neverRan, true);
 });
@@ -110,7 +110,7 @@ test("resposta que não é iCal conta como falha do calendário", quiet(async ()
   assert.equal(statusOf(db).feeds["booking/20"].problem, "resposta inválida");
 }));
 
-test("falha ao gravar reserva importada marca o calendário com problema", quiet(async () => {
+test("falha ao gravar reserva importada (erro qualquer do banco) marca o calendário com problema", quiet(async () => {
   const db = setupDb({ reservations: [] });
   const insert = db.from;
   // Faz o INSERT de reservas falhar (ex.: constraint futura recusando sobreposição).
@@ -118,7 +118,7 @@ test("falha ao gravar reserva importada marca o calendário com problema", quiet
     const q = insert(table);
     if (table !== "reservations") return q;
     const origInsert = q.insert;
-    q.insert = () => ({ then: (res) => Promise.resolve({ data: null, error: { code: "23P01" } }).then(res) });
+    q.insert = () => ({ then: (res) => Promise.resolve({ data: null, error: { code: "XX000" } }).then(res) });
     return q;
   };
   _setSupabaseForTests(db);
@@ -207,4 +207,32 @@ test("tela: falha ao consultar o status não apaga o último status conhecido", 
   await fe.run("refreshSyncStatus()");
   await fe.run("refreshSyncStatus()");
   assert.match(fe.run("syncWarning()"), /ainda não foram sincronizados/);
+});
+
+test("banco recusa reserva importada por sobreposição: calendário marcado com conflito, quarto e datas (sem nome)", quiet(async () => {
+  const db = setupDb({ reservations: [] });
+  const orig = db.from;
+  db.from = (table) => {
+    const q = orig(table);
+    if (table === "reservations") q.insert = () => ({ then: (res) => Promise.resolve({ data: null, error: { code: "23P01" } }).then(res) });
+    return q;
+  };
+  _setSupabaseForTests(db);
+  await runSync({ fetcher: async (url) => (url.includes("booking") ? ics(1) : ["BEGIN:VCALENDAR", "END:VCALENDAR"].join("\n")) });
+  db.from = orig;
+  const f = statusOf(db).feeds["booking/20"];
+  assert.equal(f.problem, "conflito com outra reserva");
+  assert.deepEqual(f.conflicts, [{ room: "20", checkIn: "2099-02-01", checkOut: "2099-02-03" }]);
+  assert.doesNotMatch(JSON.stringify(f), /Reserved|https?:/);
+}));
+
+test("tela: conflito de importação aparece como possível overbooking com quarto e datas", async () => {
+  const fe = screen({ ok: false, lastRunAt: new Date().toISOString(), stale: [],
+    failing: [{ feed: "booking/20", problem: "conflito com outra reserva", lastSuccessAt: null,
+                conflicts: [{ room: "20", checkIn: "2030-12-24", checkOut: "2030-12-26" }] }] });
+  await fe.run("refreshSyncStatus()");
+  const w = fe.run("syncWarning()");
+  assert.match(w, /overbooking/);
+  assert.match(w, /Booking quarto 20, 24\/12\/2030 → 26\/12\/2030/);
+  assert.doesNotMatch(w, /Calendário com falha/, "não repete o mesmo calendário como falha genérica");
 });
