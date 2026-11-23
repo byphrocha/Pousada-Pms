@@ -48,7 +48,7 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
 
     async function exec() {
       if (delayMs) await new Promise(r => setTimeout(r, delayMs));
-      log.push({ table, op: state.op, payload: state.payload });
+      log.push({ table, op: state.op, payload: state.payload, columns: state.columns });
       let data;
       if (state.op === "select") {
         if (failSelect && table !== "users") return { data: null, error: { message: "falha simulada" } };
@@ -58,9 +58,10 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
       } else if (state.op === "insert") {
         const list = Array.isArray(state.payload) ? state.payload : [state.payload];
         for (const r of list) {
-          if (rows().some(x => x.id === r.id)) return { data: null, error: { message: "duplicate key" } };
+          if (r.id !== undefined && rows().some(x => x.id === r.id)) return { data: null, error: { message: "duplicate key" } };
         }
-        list.forEach(r => rows().push({ ...r }));
+        // Sem id (coluna identity, ex.: audit_log): numera e marca a hora, como o banco.
+        list.forEach(r => rows().push({ ...(r.id === undefined ? { id: rows().length + 1, at: new Date().toISOString() } : {}), ...r }));
         data = list.map(r => ({ ...r }));
       } else if (state.op === "update") {
         data = [];
