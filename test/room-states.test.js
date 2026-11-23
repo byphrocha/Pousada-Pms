@@ -11,7 +11,7 @@ const { app, _setSupabaseForTests } = require("../server");
 const { createFakeSupabase } = require("./helpers/fake-supabase");
 const { loadFrontend } = require("./helpers/frontend-harness");
 
-const AUTH = "Bearer " + jwt.sign({ userId: "u2", role: "staff", username: "staff" }, process.env.JWT_SECRET, { algorithm: "HS256" });
+const AUTH = require("./helpers/auth").STAFF();
 let server, base;
 test.before(async () => { server = app.listen(0); await new Promise(r => server.once("listening", r)); base = `http://127.0.0.1:${server.address().port}`; });
 test.after(() => server.close());
