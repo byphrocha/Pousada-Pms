@@ -14,6 +14,7 @@ const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
 const feedAccess = require("./lib/feed-access");
+const reports = require("./lib/reports");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -1367,6 +1368,40 @@ app.get("/payments/receivable", authMiddleware, adminOnly, requirePayments, asyn
              group: payments.groupTag(r.notes) ? (/Casa toda/.test(payments.groupTag(r.notes)) ? "Casa Fechada" : "11+12") : null,
              guest_name: r.guest_name || "", check_in: r.check_in || null, cancelled: r.status === "cancelled" };
   }));
+});
+
+// ── Relatórios de ocupação e caixa (PMS-022), só admin ───────────────────────
+app.get("/reports/monthly", authMiddleware, adminOnly, async (req, res) => {
+  const month = String(req.query.month || "");
+  const b = reports.monthBounds(month);
+  if (!b) return res.status(400).json({ error: "Mês inválido (use AAAA-MM)" });
+
+  const { data: rows, error } = await selectAllPages(() => supabase.from("reservations")
+    .select("id, room_id, check_in, check_out, status, source, guest_name")
+    .lt("check_in", b.next).gt("check_out", b.start).order("id"));
+  if (error) return res.status(500).json({ error: "Erro ao ler reservas" });
+
+  const { data: tx, error: tErr } = await supabase.from("transactions").select("id, type, amount").eq("month", month);
+  if (tErr) return res.status(500).json({ error: "Erro ao ler o financeiro" });
+
+  let paidInMonth = [], dueInMonth = [], overdue = [], paymentsOn = false;
+  if (await paymentsEnabled()) {
+    paymentsOn = true;
+    const today = todayBrasilia();
+    const [a, c, d] = await Promise.all([
+      supabase.from("payments").select("id, kind, amount").gte("paid_at", b.start).lt("paid_at", b.next),
+      supabase.from("payments").select("id, kind, amount").is("paid_at", null).gte("due_date", b.start).lt("due_date", b.next),
+      supabase.from("payments").select("id, kind, amount").is("paid_at", null).lt("due_date", today),
+    ]);
+    if (a.error || c.error || d.error) return res.status(500).json({ error: "Erro ao ler pagamentos" });
+    paidInMonth = a.data || []; dueInMonth = c.data || []; overdue = d.data || [];
+  }
+
+  res.json({
+    month,
+    occupancy: reports.occupancy(rows || [], month),
+    cash: { ...reports.cash({ paidInMonth, dueInMonth, overdue, transactions: tx || [] }), paymentsOn },
+  });
 });
 
 // ── Pré-reservas (leads / interesse de hóspedes) ─────────────────────────────
