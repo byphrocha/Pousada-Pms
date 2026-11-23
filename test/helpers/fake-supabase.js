@@ -2,7 +2,7 @@
 // Cada consulta devolve { data, error } como o supabase-js. Sem rede.
 "use strict";
 
-function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false } = {}) {
+function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, maxRows = 1000 } = {}) {
   const tables = {};
   for (const [t, rows] of Object.entries(initial)) tables[t] = rows.map(r => ({ ...r }));
   const log = []; // operações executadas, para os testes inspecionarem
@@ -25,6 +25,7 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false } = 
       gt(c, v)  { state.filters.push(r => String(r[c]) > String(v)); return api; },
       gte(c, v) { state.filters.push(r => String(r[c]) >= String(v)); return api; },
       order()   { return api; },
+      range(a, b) { state.range = [a, b]; return api; },
       limit()   { return api; },
       single()      { state.single = "single"; return api; },
       maybeSingle() { state.single = "maybe";  return api; },
@@ -38,6 +39,8 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false } = 
       if (state.op === "select") {
         if (failSelect) return { data: null, error: { message: "falha simulada" } };
         data = rows().filter(match).map(r => ({ ...r }));
+        if (state.range) data = data.slice(state.range[0], Math.min(state.range[1] + 1, state.range[0] + maxRows));
+        else data = data.slice(0, maxRows);
       } else if (state.op === "insert") {
         const list = Array.isArray(state.payload) ? state.payload : [state.payload];
         for (const r of list) {
