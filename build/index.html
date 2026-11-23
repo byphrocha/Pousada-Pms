@@ -547,19 +547,77 @@ async function loadAll() {
     }
   } catch(e) { console.error(e); failed.push("conexão"); }
   loadError = failed.length ? `Não foi possível atualizar: ${failed.join(", ")}.` : null;
+  await refreshSyncStatus();
   render();
+}
+
+// Situação dos calendários Airbnb/Booking (PMS-011). Se estiverem atrasados ou
+// com falha, a disponibilidade importada pode estar desatualizada: o aviso
+// aparece no topo para todos. Enquanto houver problema, confere de novo em 1 min
+// (ao acordar, o servidor sincroniza ~10 s depois de abrir).
+let syncHealth = null;
+let syncRecheckTimer = null;
+async function refreshSyncStatus() {
+  const st = await api("GET", "/sync/status");
+  if (st && st.health && !st.error && !st._networkError) {
+    syncHealth = { ...st.health, syncing: !!st.syncing };
+  }
+  if (syncRecheckTimer) { clearTimeout(syncRecheckTimer); syncRecheckTimer = null; }
+  if (syncHealth && !syncHealth.ok) {
+    syncRecheckTimer = setTimeout(async () => { syncRecheckTimer = null; await refreshSyncStatus(); render(); }, 60 * 1000);
+  }
+}
+
+function feedLabel(key) {
+  const [src, room] = String(key).split("/");
+  const name = src === "airbnb" ? "Airbnb" : src === "booking" ? "Booking" : src;
+  return `${name} ${room === "CF" ? "Casa Fechada" : room}`;
+}
+
+function fmtWhen(iso) {
+  if (!iso) return "nunca";
+  const d = new Date(iso);
+  if (isNaN(d)) return "nunca";
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const hm = d.toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
+  return sameDay ? `às ${hm}` : `em ${d.toLocaleDateString("pt-BR", { day:"2-digit", month:"2-digit" })} ${hm}`;
+}
+
+// Texto do aviso de calendários, ou null se está tudo em dia.
+function syncWarning() {
+  const h = syncHealth;
+  if (!h || h.ok) return null;
+  if (h.neverRan) return "Os calendários do Airbnb/Booking ainda não foram sincronizados.";
+  const parts = [];
+  if (h.failing && h.failing.length)
+    parts.push("Calendário com falha: " + h.failing.map(f => `${feedLabel(f.feed)} (${f.problem})`).join(", ") + ".");
+  const stale = (h.stale || []).filter(s => !(h.failing || []).some(f => f.feed === s.feed));
+  if (stale.length)
+    parts.push("Sem atualizar: " + stale.map(s => `${feedLabel(s.feed)} (${fmtWhen(s.lastSuccessAt)})`).join(", ") + ".");
+  if (!parts.length && h.runStale)
+    parts.push(`Calendários do Airbnb/Booking sem atualizar desde ${fmtWhen(h.lastRunAt)}.`);
+  if (h.syncing) parts.push("Atualizando agora…");
+  return parts.join(" ");
 }
 
 // Aviso no topo quando os dados podem estar desatualizados ou incompletos.
 function renderLoadBanner() {
   const el = document.getElementById("load-banner");
   if (!el) return;
-  if (!loadError) { el.style.display = "none"; el.innerHTML = ""; return; }
-  const when = lastLoadedAt
-    ? `Dados de reservas da última atualização às ${lastLoadedAt.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.`
-    : "As reservas ainda não foram carregadas nesta sessão.";
-  el.innerHTML = `⚠️ <b>${esc(loadError)}</b> ${esc(when)} Não confirme disponibilidade sem atualizar.
+  const sw = syncWarning();
+  if (!loadError && !sw) { el.style.display = "none"; el.innerHTML = ""; return; }
+  let html = "";
+  if (loadError) {
+    const when = lastLoadedAt
+      ? `Dados de reservas da última atualização às ${lastLoadedAt.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.`
+      : "As reservas ainda não foram carregadas nesta sessão.";
+    html += `⚠️ <b>${esc(loadError)}</b> ${esc(when)} Não confirme disponibilidade sem atualizar.
     <button class="btn" style="margin-left:8px;font-size:11px;padding:4px 10px" onclick="loadAll()">Tentar de novo</button>`;
+  }
+  if (sw) {
+    html += `${html ? "<br>" : ""}📅 <b>${esc(sw)}</b> Reservas novas do Airbnb/Booking podem não aparecer: confira na plataforma antes de confirmar datas.`;
+  }
+  el.innerHTML = html;
   el.style.display = "block";
 }
 
@@ -2130,6 +2188,12 @@ function renderSync() {
     html+=`</div>`;
   });
 
+  if (syncHealth) {
+    const okLine = syncHealth.neverRan ? "Nenhuma sincronização registrada ainda."
+      : syncHealth.ok ? `✅ Última sincronização ${fmtWhen(syncHealth.lastRunAt)}: todos os calendários em dia.`
+      : `⚠️ ${syncWarning()}`;
+    html+=`<div style="font-size:12px;color:var(--dm);margin-bottom:12px">${esc(okLine)}</div>`;
+  }
   html+=`<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
     <button class="btn btn-green" onclick="saveUrls()">💾 Salvar URLs</button>
     <button class="btn btn-blue" id="sync-btn" onclick="doSync()">🔄 Sincronizar Agora</button>

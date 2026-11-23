@@ -54,8 +54,11 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
       } else if (state.op === "upsert") {
         const list = Array.isArray(state.payload) ? state.payload : [state.payload];
         data = [];
+        // Chave do conflito como no banco real: settings usa PRIMARY KEY (key);
+        // as demais tabelas usam id.
+        const pk = table === "settings" ? "key" : "id";
         for (const r of list) {
-          const cur = rows().find(x => x.id === r.id);
+          const cur = rows().find(x => x[pk] === r[pk]);
           if (cur) Object.assign(cur, r); else rows().push({ ...r });
           data.push({ ...(cur || r) });
         }

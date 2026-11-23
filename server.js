@@ -9,6 +9,7 @@ const jwt      = require("jsonwebtoken");
 const { createClient } = require("@supabase/supabase-js");
 const availability = require("./lib/availability");
 const icalReconcile = require("./lib/ical-reconcile");
+const syncStatus = require("./lib/sync-status");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -705,8 +706,16 @@ async function runSync({ fetcher = fetchUrl } = {}) {
   isSyncing = true;
   const log = ["⏳ Iniciando sincronização..."];
   let added = 0, cancelled = 0, updated = 0, failed = 0;
+  const feedResults = []; // resumo por calendário para o status (PMS-011)
   try {
-  const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").maybeSingle();
+  const { data: settingRow, error: urlsErr } = await supabase.from("settings").select("value").eq("key", "ical_urls").maybeSingle();
+  if (urlsErr) {
+    // Sem a lista de calendários não houve sincronização: não grava status
+    // (gravar "ok" com zero calendários esconderia o problema).
+    console.error(`[runSync] não foi possível ler os calendários configurados: ${urlsErr.code || urlsErr.message || "erro"}`);
+    log.push("✗ Não foi possível ler os calendários configurados. Nada foi sincronizado.");
+    return { log, added, cancelled, updated, failed: failed + 1 };
+  }
   const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
   const mode = icalReconcileMode();
   const today = todayBrasilia();
@@ -715,18 +724,23 @@ async function runSync({ fetcher = fetchUrl } = {}) {
     for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
       log.push(`🔍 ${source} — Quarto ${roomId}`);
+      const feed = { key: `${source}/${roomId}`, ok: false, problem: null, events: 0 };
+      feedResults.push(feed);
+      const failedBefore = failed;
       try {
         const targetRooms = availability.resolveRooms(roomId);
-        if (!targetRooms) { log.push(`   ⚠️ Quarto desconhecido na configuração`); continue; }
+        if (!targetRooms) { feed.problem = "quarto desconhecido"; log.push(`   ⚠️ Quarto desconhecido na configuração`); continue; }
 
         const text = await fetcher(url, 0, ICAL_ALLOWED_HOSTS);
         console.log(`[runSync] Recebido ${text.length} bytes do ${source}/${roomId}`);
         if (!text.includes("BEGIN:VCALENDAR")) {
           console.error(`[runSync] Resposta inválida do ${source}/${roomId}: não é iCal`);
+          feed.problem = "resposta inválida";
           log.push(`   ⚠️ Resposta inválida`);
           continue;
         }
         const evts = parseIcal(text, source);
+        feed.events = evts.length;
         log.push(`   → ${evts.length} reserva(s) no feed`);
 
         // Antes havia aqui um bloco que CANCELAVA toda reserva com check-out
@@ -800,7 +814,12 @@ async function runSync({ fetcher = fetchUrl } = {}) {
             }
           }
         }
-      } catch(e) { log.push(`   ✗ Erro: ${e.message}`); }
+        if (failed > failedBefore) feed.problem = "falha ao gravar";
+        else feed.ok = true;
+      } catch(e) {
+        feed.problem = syncStatus.classifyError(e);
+        log.push(`   ✗ Erro: ${e.message}`);
+      }
     }
   }
 
@@ -810,9 +829,40 @@ async function runSync({ fetcher = fetchUrl } = {}) {
   if (cancelled) parts.push(`${cancelled} cancelada(s)`);
   if (failed)    parts.push(`${failed} falha(s)`);
   log.push(`✅ Concluído${parts.length ? ` — ${parts.join(", ")}` : " — nenhuma novidade"}`);
+  await saveSyncStatus({ feeds: feedResults, added, updated, cancelled, failed });
   return { log, added, cancelled, updated, failed };
   } finally { isSyncing = false; }
 }
+
+// Grava o resumo da passada em settings.ical_sync_status (chave/valor jsonb, já
+// existente). Falhar aqui nunca derruba o sync: só registra no log.
+const SYNC_STATUS_KEY = "ical_sync_status";
+async function saveSyncStatus(run) {
+  try {
+    const { data: prev } = await supabase.from("settings").select("value").eq("key", SYNC_STATUS_KEY).maybeSingle();
+    const value = syncStatus.mergeStatus(prev && prev.value, run, new Date().toISOString());
+    const { error } = await supabase.from("settings").upsert({ key: SYNC_STATUS_KEY, value });
+    if (error) throw new Error(error.code || error.message || "erro");
+    const bad = Object.entries(value.feeds).filter(([, f]) => f.problem);
+    if (bad.length) console.warn(`[sync-status] calendários com problema: ${bad.map(([k, f]) => `${k} (${f.problem})`).join(", ")}`);
+  } catch (e) {
+    console.error(`[sync-status] não foi possível gravar o status: ${e.message}`);
+  }
+}
+
+// Situação dos calendários para a tela (todos os perfis): sem URL, sem dados de hóspede.
+app.get("/sync/status", authMiddleware, async (req, res) => {
+  const { data, error } = await supabase.from("settings").select("value").eq("key", SYNC_STATUS_KEY).maybeSingle();
+  if (error) return res.status(500).json({ error: "Não foi possível ler a situação dos calendários" });
+  const status = (data && data.value) || null;
+  res.json({
+    now: new Date().toISOString(),
+    syncing: isSyncing,
+    staleAfterMin: syncStatus.STALE_AFTER_MIN,
+    health: syncStatus.computeHealth(status, Date.now()),
+    feeds: (status && status.feeds) || {},
+  });
+});
 
 app.post("/sync", authMiddleware, adminOnly, async (req, res) => {
   const result = await runSync();
