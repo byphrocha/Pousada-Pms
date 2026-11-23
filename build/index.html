@@ -2256,7 +2256,37 @@ function renderSync() {
   if (syncLog.length) {
     html+=`<div class="log-box" id="log-box">${syncLog.map(l=>`<div>${l}</div>`).join("")}</div>`;
   }
+  html += renderFeedInventory();
   return html;
+}
+
+// ─── Quem consulta os calendários do PMS (PMS-010, passo 1) ───────────────────
+// Inventário para decidir com segurança a troca de links (regra 3).
+let feedInventory = null;
+async function loadFeedInventory() {
+  const d = await api("GET", "/calendar/inventory");
+  feedInventory = d && Array.isArray(d.feeds) ? d.feeds : [];
+  render();
+}
+function renderFeedInventory() {
+  const head = `<div style="margin-top:20px;font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em">QUEM CONSULTA OS CALENDÁRIOS DO PMS</div>`;
+  if (feedInventory === null)
+    return `${head}<button class="btn" style="margin-top:8px" onclick="loadFeedInventory()">📋 Ver inventário de acessos</button>`;
+  if (!feedInventory.length)
+    return `${head}<div style="font-size:12px;color:var(--mu);margin-top:8px">Nenhum acesso registrado ainda (o registro começou com esta versão).</div>`;
+  const rows = feedInventory
+    .sort((a, b) => (a.variant + a.room).localeCompare(b.variant + b.room))
+    .flatMap(f => Object.entries(f.agents || {}).map(([agent, a]) => `<tr>
+      <td>${f.variant === "token" ? "🔒 com token" : "🔓 antigo (sem token)"}</td>
+      <td>${esc(f.room === "CF" ? "Casa Fechada" : f.room)}</td><td>${esc(agent)}</td>
+      <td style="text-align:right">${Number(a.count) || 0}</td>
+      <td>${esc(new Date(a.lastAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }))}</td>
+      <td>${a.lastStatus === 200 ? "ok" : esc(String(a.lastStatus))}</td></tr>`)).join("");
+  return `${head}
+    <div style="overflow-x:auto;margin-top:8px"><table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr style="color:var(--mu);text-align:left"><th>Feed</th><th>Quarto</th><th>Quem</th><th style="text-align:right">Acessos</th><th>Último</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div style="font-size:10px;color:var(--mu);margin-top:6px">Só registra a plataforma, o quarto e a variante do link — nunca o token.</div>`;
 }
 
 function setIcalUrl(src, roomId, val) {

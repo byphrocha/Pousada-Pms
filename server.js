@@ -13,6 +13,7 @@ const syncStatus = require("./lib/sync-status");
 const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
+const feedAccess = require("./lib/feed-access");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -1427,7 +1428,54 @@ app.delete("/prereservations/:id", authMiddleware, adminOnly, async (req, res) =
 // ── Exportação iCal do PMS (para colar no Booking e Airbnb) ──────────────────
 // Rota PÚBLICA — Booking/Airbnb buscam sem autenticação
 // Segurança via token secreto na URL: /calendar/:token/:roomId.ics
-app.get("/calendar/:token/:roomId.ics", async (req, res) => {
+// ── Inventário de acessos aos feeds (PMS-010, passo 1) ───────────────────────
+// Acumula em memória e grava em settings.feed_access no máximo a cada 5 min.
+const FEED_ROOMS = new Set(["10","11","12","20","21","22","23","24","25","CF","11+12","all"]);
+let feedPending = {};
+let feedFlushAt = 0;
+async function flushFeedAccess(force = false) {
+  if (!Object.keys(feedPending).length) return;
+  if (!force && Date.now() - feedFlushAt < 5 * 60 * 1000) return;
+  const pending = feedPending; feedPending = {}; feedFlushAt = Date.now();
+  try {
+    const { data } = await supabase.from("settings").select("value").eq("key", "feed_access").maybeSingle();
+    const value = feedAccess.mergeInventory(data && data.value, pending);
+    const { error } = await supabase.from("settings").upsert({ key: "feed_access", value });
+    if (error) throw new Error(error.code || "erro");
+  } catch (e) {
+    console.error(`[feed-access] não foi possível gravar o inventário: ${e.message}`);
+    feedPending = feedAccess.mergeInventory(pending, feedPending); // tenta de novo depois
+  }
+}
+function trackFeed(variant) {
+  return (req, res, next) => {
+    res.on("finish", () => {
+      const room = FEED_ROOMS.has(req.params.roomId) ? req.params.roomId : "inválido";
+      const agent = feedAccess.agentFamily(req.headers["user-agent"]);
+      feedAccess.addAccess(feedPending, { variant, room, agent, status: res.statusCode, at: new Date().toISOString() });
+      console.log(`[feed] ${variant} quarto=${room} visitante=${agent} status=${res.statusCode}`);
+      flushFeedAccess().catch(() => {});
+    });
+    next();
+  };
+}
+
+// Inventário para o admin: quais feeds cada plataforma consulta.
+app.get("/calendar/inventory", authMiddleware, adminOnly, async (req, res) => {
+  await flushFeedAccess(true);
+  const { data, error } = await supabase.from("settings").select("value").eq("key", "feed_access").maybeSingle();
+  if (error) return res.status(500).json({ error: "Erro ao ler o inventário" });
+  res.json({ feeds: Object.values((data && data.value) || {}) });
+});
+
+// Feeds só do mês passado em diante (as plataformas ignoram o passado) e com
+// todas as páginas: sem isso, acima de 1.000 linhas o feed omitia reservas.
+const feedCutoff = () => {
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000 - 31 * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+};
+
+app.get("/calendar/:token/:roomId.ics", trackFeed("token"), async (req, res) => {
   const CALENDAR_TOKEN = process.env.CALENDAR_TOKEN || "";
   if (!CALENDAR_TOKEN || !safeEqual(req.params.token, CALENDAR_TOKEN)) {
     return res.status(403).send("Acesso negado");
@@ -1440,18 +1488,17 @@ app.get("/calendar/:token/:roomId.ics", async (req, res) => {
   }
 
   try {
-    let query = supabase
-      .from("reservations")
-      .select("id, room_id, guest_name, check_in, check_out, external_uid")
-      .eq("status", "confirmed");
-
-    if (roomId === "11+12") {
-      query = query.in("room_id", ["11","12"]);
-    } else if (roomId !== "CF") {
-      query = query.eq("room_id", roomId);
-    }
-
-    const { data, error } = await query;
+    const cutoff = feedCutoff();
+    const { data, error } = await selectAllPages(() => {
+      let query = supabase
+        .from("reservations")
+        .select("id, room_id, guest_name, check_in, check_out, external_uid")
+        .eq("status", "confirmed")
+        .gte("check_out", cutoff);
+      if (roomId === "11+12") query = query.in("room_id", ["11","12"]);
+      else if (roomId !== "CF") query = query.eq("room_id", roomId);
+      return query.order("check_in").order("id");
+    });
     if (error) throw error;
 
     const now = new Date().toISOString().replace(/[-:.]/g,"").slice(0,15) + "Z";
@@ -1520,7 +1567,7 @@ app.get("/calendar-urls", authMiddleware, adminOnly, async (req, res) => {
 // Protegido por token opcional: ?token=ICAL_TOKEN
 const ICAL_TOKEN = process.env.ICAL_TOKEN || null;
 
-app.get("/calendar/:roomId.ics", async (req, res) => {
+app.get("/calendar/:roomId.ics", trackFeed("legado"), async (req, res) => {
   if (ICAL_TOKEN && req.query.token !== ICAL_TOKEN)
     return res.status(401).send("Unauthorized");
 
@@ -1530,14 +1577,16 @@ app.get("/calendar/:roomId.ics", async (req, res) => {
     return res.status(404).send("Quarto não encontrado");
 
   try {
-    let query = supabase
-      .from("reservations")
-      .select("id, room_id, guest_name, check_in, check_out, status, source")
-      .neq("status", "cancelled")
-      .order("check_in");
-    if (roomId !== "all") query = query.eq("room_id", roomId);
-
-    const { data, error } = await query;
+    const cutoff = feedCutoff();
+    const { data, error } = await selectAllPages(() => {
+      let query = supabase
+        .from("reservations")
+        .select("id, room_id, guest_name, check_in, check_out, status, source")
+        .neq("status", "cancelled")
+        .gte("check_out", cutoff);
+      if (roomId !== "all") query = query.eq("room_id", roomId);
+      return query.order("check_in").order("id");
+    });
     if (error) return res.status(500).send("Erro ao buscar reservas");
 
     const now  = new Date().toISOString().replace(/[-:.]/g,"").slice(0,15) + "Z";
@@ -1604,6 +1653,8 @@ app.use((err, req, res, next) => {
 // executado diretamente (node server.js / npm start).
 module.exports = {
   app, runSync,
+  _flushFeedAccessForTests: () => flushFeedAccess(true),
+  _resetFeedAccessForTests: () => { feedPending = {}; feedFlushAt = 0; },
   _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); tableCache = new Map(); },
   _resetIcalStateForTests: () => icalMissingCounts.clear(),
   _resetSessionCacheForTests: () => sessionCache.clear(),
