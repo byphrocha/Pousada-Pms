@@ -2,8 +2,16 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>PMS · Pousada</title>
+<!-- Instalação na tela de início (iPhone/Android). Sem service worker: nenhum dado fica em cache offline. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0d1221">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pousada">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,700;1,300&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -144,8 +152,10 @@ input,select,textarea{font-family:'DM Mono',monospace}
     flex-direction:column; font-size:18px; gap:2px;
   }
   .nav-btn.active{border-top-color:var(--bl);background:var(--bg3)}
-  #main{order:1; overflow:hidden; padding-bottom:58px}
-  #topbar{padding:10px 14px}
+  #main{order:1; overflow:hidden; padding-bottom:calc(58px + env(safe-area-inset-bottom, 0px))}
+  /* Aberto pela tela de início: respeita notch/Dynamic Island e barra do iPhone */
+  #sidebar{height:calc(58px + env(safe-area-inset-bottom, 0px)); padding-bottom:env(safe-area-inset-bottom, 0px)}
+  #topbar{padding:10px 14px; padding-top:calc(10px + env(safe-area-inset-top, 0px))}
   #topbar h1{font-size:15px}
   #topbar .sub{display:none}
   #topbar .btn{font-size:11px;padding:7px 12px}
@@ -2486,6 +2496,17 @@ function startAutoRefresh() {
 function stopAutoRefresh() {
   if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
 }
+
+// Ao voltar para o app (iPhone em segundo plano, troca de aba), recarrega os dados
+// em vez de mostrar a tela de até 5 minutos atrás. Intervalo mínimo de 30 s.
+let lastVisibleRefresh = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !authToken) return;
+  const now = Date.now();
+  if (now - lastVisibleRefresh < 30 * 1000) return;
+  lastVisibleRefresh = now;
+  loadAll();
+});
 if (authToken) {
   applyRole();
   loadAll().catch(() => { clearAuth(); showLoginScreen(); });
