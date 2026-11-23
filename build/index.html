@@ -336,6 +336,7 @@ let groupByDate  = true;          // agrupamento por data nas reservas
 let prereservations = [];
 
 
+let cleanedRooms   = new Set();   // quartos limpos hoje (antes nunca era declarada)
 let checkedInRooms = new Set();   // quartos com check-in confirmado hoje
 
 async function saveRoomStates() {
@@ -358,6 +359,20 @@ async function loadRoomStates() {
 // saveClean/saveCheckedIn agora salvam no servidor (sincroniza entre dispositivos)
 function saveClean()     { saveRoomStates(); }
 function saveCheckedIn() { saveRoomStates(); }
+
+// Marca um quarto no servidor (uma marcação por vez, somada às dos outros aparelhos).
+// Em caso de falha, avisa e recarrega o estado real, em vez de fingir que salvou.
+async function markRoomState(roomId, kind) {
+  const res = await api("POST", `/room-states/${encodeURIComponent(roomId)}/${kind}`);
+  if (res && Array.isArray(res.cleaned) && Array.isArray(res.checkedIn)) {
+    cleanedRooms   = new Set(res.cleaned);
+    checkedInRooms = new Set(res.checkedIn);
+  } else {
+    alert("Não foi possível salvar a marcação do quarto " + roomId + ". Verifique a conexão e tente de novo.");
+    await loadRoomStates();
+  }
+  render();
+}
 
 // ─── Auth state ──────────────────────────────────────────────────────────────
 let authToken    = localStorage.getItem("pms_token") || "";
@@ -703,15 +718,15 @@ function getRoomRes(roomId) {
 function markCheckedIn(roomId, event) {
   if (event) event.stopPropagation();
   checkedInRooms.add(roomId);
-  saveCheckedIn();
   render();
+  return markRoomState(roomId, "checkedIn");
 }
 
 function markClean(roomId, event) {
-  event.stopPropagation();
+  if (event) event.stopPropagation();
   cleanedRooms.add(roomId);
-  saveClean();
   render();
+  return markRoomState(roomId, "cleaned");
 }
 
 const STATUS = {
@@ -2215,10 +2230,8 @@ function openCheckinModal(roomId) {
 }
 
 function markCheckedInFromModal(roomId) {
-  checkedInRooms.add(roomId);
-  saveCheckedIn();
   closeModal();
-  render();
+  return markCheckedIn(roomId);
 }
 
 function openCleaningModal(roomId) {
@@ -2243,10 +2256,8 @@ function openCleaningModal(roomId) {
 }
 
 function markCleanFromModal(roomId) {
-  cleanedRooms.add(roomId);
-  saveClean();
   closeModal();
-  render();
+  return markClean(roomId);
 }
 
 function openNewModal(roomId) {

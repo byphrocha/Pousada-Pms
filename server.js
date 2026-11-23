@@ -813,27 +813,62 @@ function todayBrasilia() {
   return d.toISOString().split("T")[0];
 }
 
+// Estados do dia (limpeza / check-in), guardados em settings.room_states_<dia>.
+// Antes, cada aparelho gravava as listas inteiras: a última gravação apagava as
+// marcações feitas em outro aparelho (P1.4). Agora as gravações são somadas e
+// feitas uma por vez (o Render roda uma instância só). A tela só marca, nunca
+// desmarca, então somar é seguro. Modelo definitivo: eventos por quarto (PMS-013).
+const ROOM_STATE_ROOMS = availability.ROOM_IDS;
+let roomStateQueue = Promise.resolve();
+function withRoomStateLock(fn) {
+  const run = roomStateQueue.then(fn, fn);
+  roomStateQueue = run.catch(() => {});
+  return run;
+}
+async function readRoomStates(day) {
+  const { data, error } = await supabase.from("settings")
+    .select("value").eq("key", "room_states_" + day).maybeSingle();
+  if (error) throw new Error("falha ao ler estados dos quartos");
+  const v = data?.value || {};
+  return {
+    cleaned:   Array.isArray(v.cleaned)   ? v.cleaned.map(String)   : [],
+    checkedIn: Array.isArray(v.checkedIn) ? v.checkedIn.map(String) : [],
+  };
+}
+async function addRoomStates(day, add) {
+  return withRoomStateLock(async () => {
+    const cur = await readRoomStates(day);
+    const merged = {
+      cleaned:   [...new Set([...cur.cleaned,   ...add.cleaned])].sort(),
+      checkedIn: [...new Set([...cur.checkedIn, ...add.checkedIn])].sort(),
+    };
+    const { error } = await supabase.from("settings").upsert({ key: "room_states_" + day, value: merged });
+    if (error) throw new Error("falha ao gravar estados dos quartos");
+    return merged;
+  });
+}
+const onlyRooms = (list) => Array.isArray(list) ? list.map(String).filter(r => ROOM_STATE_ROOMS.includes(r)) : [];
+
 app.get("/room-states", authMiddleware, async (req, res) => {
-  const today = todayBrasilia();
-  const { data } = await supabase.from("settings")
-    .select("value").eq("key", "room_states_"+today).single();
-  res.json(data?.value || { cleaned: [], checkedIn: [] });
+  res.json(await readRoomStates(todayBrasilia()));
 });
 
+// Rota antiga (aparelhos com a tela antiga em cache): soma, não substitui.
 app.post("/room-states", authMiddleware, async (req, res) => {
-  const today = todayBrasilia();
   const { cleaned, checkedIn } = req.body || {};
-  const VALID_ROOMS = ["10","11","12","20","21","22","23","24","25"];
-  // Valida que são arrays e contêm apenas IDs de quartos conhecidos
-  const safeClean = Array.isArray(cleaned)
-    ? cleaned.filter(r => VALID_ROOMS.includes(String(r))) : [];
-  const safeCheckedIn = Array.isArray(checkedIn)
-    ? checkedIn.filter(r => VALID_ROOMS.includes(String(r))) : [];
-  await supabase.from("settings").upsert({
-    key: "room_states_"+today,
-    value: { cleaned: safeClean, checkedIn: safeCheckedIn }
-  });
-  res.json({ ok: true });
+  const merged = await addRoomStates(todayBrasilia(), { cleaned: onlyRooms(cleaned), checkedIn: onlyRooms(checkedIn) });
+  res.json({ ok: true, ...merged });
+});
+
+// Marca um quarto: POST /room-states/24/cleaned ou /room-states/24/checkedIn
+app.post("/room-states/:roomId/:kind", authMiddleware, async (req, res) => {
+  const { roomId, kind } = req.params;
+  if (!ROOM_STATE_ROOMS.includes(roomId) || !["cleaned", "checkedIn"].includes(kind))
+    return res.status(400).json({ error: "Quarto ou tipo inválido" });
+  const add = { cleaned: [], checkedIn: [] };
+  add[kind].push(roomId);
+  const merged = await addRoomStates(todayBrasilia(), add);
+  res.json({ ok: true, ...merged });
 });
 
 app.delete("/guests/:id", authMiddleware, adminOnly, async (req, res) => {
