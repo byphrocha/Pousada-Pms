@@ -2274,7 +2274,7 @@ function renderSync() {
   html+=`<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
     <button class="btn btn-green" onclick="saveUrls()">💾 Salvar URLs</button>
     <button class="btn btn-blue" id="sync-btn" onclick="doSync()">🔄 Sincronizar Agora</button>
-    <button class="btn btn-red" id="clean-btn" onclick="doCleanup()" title="Remove registros 'Not available', 'Closed', 'Blocked' etc do banco">🗑 Limpar Bloqueios</button>
+    <button class="btn" id="clean-btn" onclick="doCleanup()" title="Marca como cancelados os bloqueios do Airbnb que já terminaram. Nada é apagado; bloqueios atuais e futuros ficam.">🧹 Arquivar bloqueios antigos</button>
   </div>`;
 
   if (syncLog.length) {
@@ -2319,21 +2319,23 @@ function setIcalUrl(src, roomId, val) {
 }
 
 async function saveUrls() {
-  await api("POST","/urls", icalUrls);
-  alert("URLs salvas com sucesso!");
+  const r = await api("POST","/urls", icalUrls);
+  const err = apiErrorMessage(r);
+  // Antes mostrava "sucesso" mesmo quando o servidor recusava (PMS-012).
+  alert(err ? `Não foi possível salvar as URLs: ${err}` : "URLs salvas com sucesso!");
 }
 
 async function doCleanup() {
   const btn = document.getElementById("clean-btn");
   if (btn) btn.disabled = true;
-  syncLog = ["🗑 Removendo bloqueios do banco..."];
+  syncLog = ["🧹 Arquivando bloqueios do Airbnb que já terminaram..."];
   render();
   try {
     const data = await api("POST", "/cleanup-blocked");
     if (data.ok) {
-      syncLog = [`✅ ${data.deleted} registro(s) de bloqueio removido(s) do banco.`];
+      syncLog = [`✅ ${data.cancelled} bloqueio(s) já encerrado(s) marcado(s) como cancelado(s). Nada foi apagado.`];
     } else {
-      syncLog = ["✗ Erro: " + (data.error||"desconhecido")];
+      syncLog = ["✗ Erro: " + (apiErrorMessage(data) || "desconhecido")];
     }
   } catch(e) {
     syncLog = ["✗ Erro: " + e.message];
