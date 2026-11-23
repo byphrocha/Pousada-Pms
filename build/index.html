@@ -2395,7 +2395,7 @@ function reservationForm(r, isEdit) {
     <div class="field"><label>E-mail</label>
       <input id="f-email" value="${esc(r.email||"")}" placeholder="email@exemplo.com"></div>
   </div>
-  <div class="row2">
+  ${authRole === "admin" ? `<div class="row2">
     <div class="field"><label>Valor Total (R$)</label>
       <input type="number" id="f-amount" value="${esc(r.amount||"")}" min="0" step="0.01" placeholder="0,00"></div>
     <div class="field"><label>Forma de Pagamento</label>
@@ -2405,7 +2405,7 @@ function reservationForm(r, isEdit) {
         <option value="cartao"      ${r.payment==="cartao"               ?"selected":""}>Cartão</option>
         <option value="transferencia" ${r.payment==="transferencia"      ?"selected":""}>Transferência</option>
       </select></div>
-  </div>
+  </div>` : ""}
   <div class="field"><label>Observações</label>
     <textarea id="f-notes">${esc(r.notes||"")}</textarea></div>
   ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
@@ -2534,6 +2534,8 @@ async function submitForm(id) {
     payment:   get("f-payment")||"pix",
     status:    "confirmed",
   };
+  // Funcionário não vê nem envia valores (o servidor também ignora).
+  if (authRole !== "admin") { delete form.amount; delete form.payment; }
   if (!form.guestName||!form.checkIn||!form.checkOut||form.checkOut<=form.checkIn) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }

@@ -242,6 +242,17 @@ app.post("/change-password", authMiddleware, async (req, res) => {
 // dígitos (decisão do Paulo, 23/11/2026). Feito no servidor: esconder na tela
 // não protege, a API devolveria tudo.
 const isAdmin = (req) => req.user?.role === "admin";
+
+// Valores de reserva (decisão do Paulo, 23/11/2026): o funcionário faz e edita
+// reservas, mas não vê nem altera valor e forma de pagamento. Garantido aqui,
+// não só na tela.
+const MONEY_FIELDS = ["amount", "payment"];
+function reservationForRole(req, r) {
+  if (!r || isAdmin(req)) return r;
+  const out = { ...r };
+  for (const k of MONEY_FIELDS) delete out[k];
+  return out;
+}
 function maskCpf(cpf) {
   const d = String(cpf || "").replace(/\D/g, "");
   return d.length >= 2 ? `***.***.***-${d.slice(-2)}` : "";
@@ -548,7 +559,7 @@ app.get("/reservations", authMiddleware, async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   // Bloqueios "Not available" do Airbnb: a tela já os descartava (isAirbnbBlock);
   // filtrar aqui reduz a resposta sem mudar o que é exibido.
-  res.json(data.filter(r => !availability.isCalendarBlock(r)));
+  res.json(data.filter(r => !availability.isCalendarBlock(r)).map(r => reservationForRole(req, r)));
 });
 
 app.post("/reservations", authMiddleware, async (req, res) => {
@@ -575,9 +586,10 @@ app.post("/reservations", authMiddleware, async (req, res) => {
     if (exists) return res.json({ ok: false, reason: "duplicate" });
   }
   const row = buildReservationRow(b);
+  if (!isAdmin(req)) { row.amount = 0; row.payment = "pix"; } // valor fica para o admin lançar
   const { data, error } = await supabase.from("reservations").insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true, reservation: data });
+  res.json({ ok: true, reservation: reservationForRole(req, data) });
 });
 
 // Normaliza o corpo de uma reserva nova para a linha do banco (POST simples e grupo).
@@ -647,6 +659,7 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
   }
 
   const rows = list.map(buildReservationRow);
+  if (!isAdmin(req)) for (const r of rows) { r.amount = 0; r.payment = "pix"; }
   const { data, error } = await supabase.from("reservations").insert(rows).select();
   if (error) {
     console.error(`[reservations/group] falha ao gravar ${product}: ${error.message || error}`);
@@ -654,7 +667,7 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
   }
   // Devolve na mesma ordem em que o cliente mandou (o 1º id recebe o lançamento financeiro).
   const byId = new Map((data || []).map(r => [String(r.id), r]));
-  res.json({ ok: true, product, reservations: rows.map(r => byId.get(String(r.id)) || r) });
+  res.json({ ok: true, product, reservations: rows.map(r => reservationForRole(req, byId.get(String(r.id)) || r)) });
 });
 
 app.put("/reservations/:id", authMiddleware, async (req, res) => {
@@ -672,6 +685,9 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   if (b.amount    !== undefined) row.amount     = Math.max(0, parseFloat(b.amount) || 0);
   if (b.payment   !== undefined) row.payment    = ["pix","dinheiro","cartao","transferencia"].includes(b.payment) ? b.payment : "pix";
   if (b.status    !== undefined) row.status     = ["confirmed","cancelled","pending"].includes(b.status) ? b.status : "confirmed";
+  // Funcionário: valor e pagamento são ignorados (a tela dele nem mostra os campos;
+  // ignorar em vez de recusar evita apagar o valor quando o formulário vem sem ele).
+  if (!isAdmin(req)) for (const k of MONEY_FIELDS) delete row[k];
 
   // Mudança de quarto, datas ou status: valida o resultado final da reserva
   // (antes o PUT aceitava qualquer data, inclusive saída antes da entrada — D2).
