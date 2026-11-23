@@ -516,7 +516,15 @@ app.post("/reservations", authMiddleware, async (req, res) => {
     const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", b.externalUid).single();
     if (exists) return res.json({ ok: false, reason: "duplicate" });
   }
-  const row = {
+  const row = buildReservationRow(b);
+  const { data, error } = await supabase.from("reservations").insert(row).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, reservation: data });
+});
+
+// Normaliza o corpo de uma reserva nova para a linha do banco (POST simples e grupo).
+function buildReservationRow(b) {
+  return {
     id:           b.id || genId(),
     room_id:      String(b.roomId).slice(0, 10),
     guest_name:   String(b.guestName).slice(0, 200),
@@ -533,9 +541,62 @@ app.post("/reservations", authMiddleware, async (req, res) => {
     amount:       Math.max(0, parseFloat(b.amount) || 0),
     payment:      ["pix","dinheiro","cartao","transferencia"].includes(b.payment) ? b.payment : "pix",
   };
-  const { data, error } = await supabase.from("reservations").insert(row).select().single();
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true, reservation: data });
+}
+
+// Reserva composta (CF ou 11+12) gravada de uma vez — regra 5: tudo ou nada.
+// O cliente manda uma linha por quarto físico (mantém as marcas [Casa toda:…] /
+// [Suíte grupo:…] nas notas). O servidor exige que os quartos formem exatamente
+// um produto, que todas as linhas tenham as mesmas datas e status, checa a
+// disponibilidade de TODOS os quartos e grava num único INSERT: o Postgres
+// executa um INSERT com várias linhas como uma instrução só, então ou entram
+// todas ou nenhuma. A corrida entre checar e gravar só fecha com a constraint
+// no banco (PR 6 da revisão).
+app.post("/reservations/group", authMiddleware, async (req, res) => {
+  const list = req.body && req.body.rows;
+  if (!Array.isArray(list) || list.length < 2 || list.length > availability.ROOM_IDS.length)
+    return res.status(400).json({ error: "rows deve ter de 2 a 9 linhas" });
+  if (list.some(b => !b || typeof b !== "object"))
+    return res.status(400).json({ error: "rows inválido" });
+
+  const rooms = list.map(b => String(b.roomId ?? ""));
+  const product = Object.keys(availability.PRODUCTS).find(p => {
+    const expected = availability.PRODUCTS[p];
+    return expected.length === rooms.length && expected.every(r => rooms.includes(r));
+  });
+  if (!product)
+    return res.status(400).json({ error: "Os quartos devem formar exatamente a Casa Fechada (9 quartos) ou a suíte 11+12" });
+
+  const first = list[0];
+  if (!first.guestName || !String(first.guestName).trim())
+    return res.status(400).json({ error: "guestName é obrigatório" });
+  const invalid = availability.validateStay(first.checkIn, first.checkOut);
+  if (invalid) return res.status(400).json({ error: invalid });
+  const status = first.status ?? "confirmed";
+  const same = list.every(b =>
+    b.checkIn === first.checkIn && b.checkOut === first.checkOut && (b.status ?? "confirmed") === status &&
+    b.guestName && String(b.guestName).trim());
+  if (!same) return res.status(400).json({ error: "Todas as linhas precisam ter o mesmo hóspede, datas e status" });
+  if (list.some(b => b.externalUid))
+    return res.status(400).json({ error: "Reservas importadas não usam esta rota" });
+  const ids = list.map(b => b.id).filter(Boolean).map(String);
+  if (new Set(ids).size !== ids.length)
+    return res.status(400).json({ error: "ids repetidos" });
+
+  if (availability.isBlocking(status)) {
+    const blocked = await guardAvailability(
+      { rooms, checkIn: first.checkIn, checkOut: first.checkOut }, `POST /reservations/group ${product}`);
+    if (blocked) return res.status(blocked.status).json(blocked.body);
+  }
+
+  const rows = list.map(buildReservationRow);
+  const { data, error } = await supabase.from("reservations").insert(rows).select();
+  if (error) {
+    console.error(`[reservations/group] falha ao gravar ${product}: ${error.message || error}`);
+    return res.status(500).json({ error: "Não foi possível gravar a reserva. Nada foi salvo; tente novamente." });
+  }
+  // Devolve na mesma ordem em que o cliente mandou (o 1º id recebe o lançamento financeiro).
+  const byId = new Map((data || []).map(r => [String(r.id), r]));
+  res.json({ ok: true, product, reservations: rows.map(r => byId.get(String(r.id)) || r) });
 });
 
 app.put("/reservations/:id", authMiddleware, async (req, res) => {
