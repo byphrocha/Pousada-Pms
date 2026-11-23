@@ -62,18 +62,22 @@ test("conflitos: cancelada não ocupa", () => {
   assert.deepEqual(A.findConflicts(EXISTING, { rooms: ["23"], checkIn: "2026-03-10", checkOut: "2026-03-12" }), []);
 });
 
-test("conflitos: pendente ocupa (comportamento atual, decisão pendente)", () => {
-  assert.equal(A.findConflicts(EXISTING, { rooms: ["12"], checkIn: "2026-03-11", checkOut: "2026-03-12" }).length, 1);
+test("conflitos: pendente NÃO ocupa (decisão do Paulo, 23/11/2026)", () => {
+  assert.equal(A.findConflicts(EXISTING, { rooms: ["12"], checkIn: "2026-03-11", checkOut: "2026-03-12" }).length, 0);
+  assert.equal(A.isBlocking("pending"), false);
+  assert.equal(A.isBlocking("confirmed"), true);
 });
 
 test("conflitos: 11+12 conflita se qualquer um dos dois estiver ocupado", () => {
-  const c = A.findConflicts(EXISTING, { rooms: A.resolveRooms("11+12"), checkIn: "2026-03-11", checkOut: "2026-03-14" });
+  const rows = [...EXISTING, { id: "d", room_id: "12", check_in: "2026-03-12", check_out: "2026-03-13", status: "confirmed" }];
+  const c = A.findConflicts(rows, { rooms: A.resolveRooms("11+12"), checkIn: "2026-03-11", checkOut: "2026-03-14" });
   assert.deepEqual(c.map(x => x.room_id), ["12"]);
+  assert.deepEqual(c.map(x => x.id), ["d"], "a pendente do 12 não entra");
 });
 
-test("conflitos: CF lista todos os quartos ocupados", () => {
+test("conflitos: CF lista todos os quartos ocupados (pendente não conta)", () => {
   const c = A.findConflicts(EXISTING, { rooms: A.resolveRooms("CF"), checkIn: "2026-03-09", checkOut: "2026-03-11" });
-  assert.deepEqual(c.map(x => x.room_id).sort(), ["12", "20"]);
+  assert.deepEqual(c.map(x => x.room_id).sort(), ["20"]);
 });
 
 test("conflitos: edição ignora a própria reserva", () => {

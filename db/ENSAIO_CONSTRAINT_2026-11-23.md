@@ -26,12 +26,22 @@ Produção **não** foi alterada.
 | 4 | Cancelada sobreposta | aceita | aceita |
 | 5 | Bloqueio "Not available" do Airbnb sobreposto | aceita | aceita |
 | 6 | Booking "CLOSED - Not available" sobreposto (pode ser reserva real) | recusa | recusa (23P01) |
-| 7 | `pending` sobreposta | recusa | recusa (23P01) |
+| 7 | `pending` sobreposta (regra antiga) | recusa | recusa (23P01) |
 | 8 | CF (9 linhas num INSERT) com o quarto 20 ocupado | recusa, 0 linhas | recusa (23P01), **0 linhas gravadas** |
 | 9 | Editar datas para cima de outra reserva | recusa | recusa (23P01) |
 | 10 | Reativar reserva cancelada que conflita | recusa | recusa (23P01) |
 | 11 | Histórico (antes do corte de 24/11/2026) sobreposto | aceita | aceita |
 | 12 | 11+12 num INSERT, quartos livres | aceita | aceita |
+
+**Reensaio após a decisão de 23/11/2026 ("pending" não bloqueia), constraint recriada com `status not in ('cancelled','pending')`:**
+
+| # | Caso | Esperado | Obtido |
+|---|---|---|---|
+| 7 | `pending` sobreposta a uma confirmada | aceita | aceita |
+| 7b | Confirmada sobreposta a confirmada | recusa | recusa (23P01) |
+| 7c | **Confirmar** a `pending` cujas datas já estão ocupadas | recusa | recusa (23P01) → servidor responde 409 |
+| 1 | Sobrepõe mesmo quarto | recusa | recusa (23P01) |
+| 2 | Adjacente | aceita | aceita |
 
 **Concorrência:** não executada com duas conexões simultâneas (as ferramentas só permitem uma conexão por vez). A garantia vem do próprio Postgres: constraint de exclusão é verificada no commit e uma segunda transação concorrente espera a primeira e então é recusada. O teste `todo` do Node continua documentando que a camada 1 sozinha não fecha a corrida.
 
