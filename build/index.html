@@ -636,29 +636,24 @@ async function saveReservation(form) {
   return { ok:true, reservation: res.reservation };
 }
 
-// Grava as linhas de uma reserva composta (CF ou 11+12) uma a uma.
-// Se alguma falhar, CANCELA (não apaga) as que já foram criadas, para não deixar
-// a Casa Fechada ou a suíte ocupando só parte dos quartos. Não é atômico de verdade:
-// a garantia de "tudo ou nada" vem com a função no banco (PR 6 da revisão).
+// Grava uma reserva composta (CF ou 11+12) numa única chamada ao servidor,
+// que grava todas as linhas ou nenhuma (regra 5). Antes eram 9 chamadas
+// seguidas: uma falha de rede no meio deixava a Casa Fechada pela metade.
 async function saveReservationGroup(rows) {
-  const created = [];
-  for (const row of rows) {
-    const r = await saveReservation(row);
-    if (!r.ok) {
-      const undone = [];
-      for (const c of created) {
-        const u = await api("PUT", `/reservations/${c.id}`, { status: "cancelled" });
-        if (!apiErrorMessage(u)) undone.push(c.roomId);
-      }
-      const notUndone = created.filter(c => !undone.includes(c.roomId)).map(c => c.roomId);
-      let msg = `Não foi possível reservar o quarto ${row.roomId}: ${r.error}`;
-      if (undone.length)    msg += `\nOs quartos ${undone.join(", ")} já criados foram cancelados.`;
-      if (notUndone.length) msg += `\n⚠️ ATENÇÃO: os quartos ${notUndone.join(", ")} ficaram reservados. Cancele-os manualmente.`;
-      return { ok:false, error: msg, created: [] };
-    }
-    created.push({ id: r.reservation.id, roomId: row.roomId });
-  }
-  return { ok:true, created };
+  const ids = rows.map(r => r.id || genId());
+  const res = await api("POST", "/reservations/group", {
+    rows: rows.map((r, i) => ({ ...r, id: ids[i] })),
+  });
+  // Sem resposta, não dá para saber se o servidor gravou: avisar para conferir
+  // antes de repetir (repetir criaria uma segunda Casa Fechada).
+  if (res && res._networkError)
+    return { ok:false, created: [], error: "Sem conexão com o servidor. Confira na tela se a reserva " +
+      "aparece antes de tentar de novo — ela pode ter sido gravada." };
+  const err = apiErrorMessage(res);
+  if (err || !Array.isArray(res.reservations))
+    return { ok:false, error: err || "Erro ao salvar a reserva. Nada foi salvo.", created: [] };
+  res.reservations.forEach(r => reservations.push(normalizeRes(r)));
+  return { ok:true, created: rows.map((r, i) => ({ id: ids[i], roomId: r.roomId })) };
 }
 
 // Checagem de conflito no navegador para os quartos físicos informados.
