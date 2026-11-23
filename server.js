@@ -8,6 +8,7 @@ const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
 const { createClient } = require("@supabase/supabase-js");
 const availability = require("./lib/availability");
+const icalReconcile = require("./lib/ical-reconcile");
 
 const app  = express();
 const PORT       = process.env.PORT || 3000;
@@ -228,7 +229,6 @@ function parseIcal(text, source) {
   // Verifica se tem BEGIN:VCALENDAR
   if (!text.includes("BEGIN:VCALENDAR")) {
     console.error(`[parseIcal] Não encontrado BEGIN:VCALENDAR no iCal do ${source}`);
-    console.log(`[parseIcal] Primeiros 200 chars: ${text.slice(0, 200)}`);
     return events;
   }
   
@@ -270,12 +270,9 @@ function parseIcal(text, source) {
       continue;
     }
     
-    if (source === "airbnb" && isAirbnbBlock(summary, uid)) {
-      console.log(`[parseIcal] Evento ${i} bloqueado (Airbnb block): ${summary}`);
-      continue;
-    }
-    
-    console.log(`[parseIcal] Evento ${i} adicionado: ${summary} (${dtstart} → ${dtend})`);
+    if (source === "airbnb" && isAirbnbBlock(summary, uid)) continue;
+
+    // Sem log por evento: o SUMMARY pode trazer dados do hóspede (achado I7).
     events.push({ uid, summary, checkIn: dtstart, checkOut: dtend });
   }
   
@@ -550,64 +547,57 @@ const ICAL_ALLOWED_HOSTS = [
   "booking.com", "ical.booking.com", "www.booking.com",
 ];
 
-async function runSync() {
+// Reconciliação dos feeds (PMS-009, achados I1/I2):
+//   report → só registra no log o que atualizaria/cancelaria (padrão)
+//   apply  → aplica as atualizações de datas e os cancelamentos
+//   off    → não reconcilia
+function icalReconcileMode() {
+  const m = String(process.env.ICAL_RECONCILE || "report").toLowerCase();
+  return ["report", "apply", "off"].includes(m) ? m : "report";
+}
+// Ausências seguidas de cada linha no feed (em memória; reinício do servidor zera,
+// o que só atrasa um cancelamento, nunca antecipa).
+const icalMissingCounts = new Map();
+
+async function runSync({ fetcher = fetchUrl } = {}) {
   if (isSyncing) return { log: ["⚠️ Sincronização já em andamento, aguarde."], added: 0 };
   isSyncing = true;
-  const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
-  const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
   const log = ["⏳ Iniciando sincronização..."];
-  let added = 0;
-  let cancelled = 0;
+  let added = 0, cancelled = 0, updated = 0, failed = 0;
   try {
+  const { data: settingRow } = await supabase.from("settings").select("value").eq("key", "ical_urls").maybeSingle();
+  const icalUrls = settingRow?.value || { booking: {}, airbnb: {} };
+  const mode = icalReconcileMode();
+  const today = todayBrasilia();
 
   for (const [source, urls] of Object.entries(icalUrls)) {
     for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
       log.push(`🔍 ${source} — Quarto ${roomId}`);
       try {
-        const text = await fetchUrl(url, 0, ICAL_ALLOWED_HOSTS);
+        const targetRooms = availability.resolveRooms(roomId);
+        if (!targetRooms) { log.push(`   ⚠️ Quarto desconhecido na configuração`); continue; }
+
+        const text = await fetcher(url, 0, ICAL_ALLOWED_HOSTS);
         console.log(`[runSync] Recebido ${text.length} bytes do ${source}/${roomId}`);
-        if (!text.includes("BEGIN:VCALENDAR")) { 
+        if (!text.includes("BEGIN:VCALENDAR")) {
           console.error(`[runSync] Resposta inválida do ${source}/${roomId}: não é iCal`);
-          log.push(`   ⚠️ Resposta inválida`); 
-          continue; 
+          log.push(`   ⚠️ Resposta inválida`);
+          continue;
         }
         const evts = parseIcal(text, source);
         log.push(`   → ${evts.length} reserva(s) no feed`);
 
-        const ALL_ROOMS = ["10","11","12","20","21","22","23","24","25"];
-        const targetRooms = roomId === "CF"    ? ALL_ROOMS
-                          : roomId === "11+12" ? ["11","12"]
-                          : [roomId];
-
-        const roomFilter = targetRooms;
-
-        // ── RECONCILIAÇÃO: cancelar apenas reservas com data passada ────────
-        // Não cancelar por UID (pode variar entre syncs do Airbnb/Booking)
-        const today = new Date().toISOString().split("T")[0];
-        const { data: outdated } = await supabase
-          .from("reservations")
-          .select("id, guest_name, check_in")
-          .eq("source", source)
-          .eq("status", "confirmed")
-          .in("room_id", roomFilter)
-          .lt("check_out", today);  // Data de saída já passou
-
-        for (const r of outdated || []) {
-          await supabase.from("reservations")
-            .update({ status: "cancelled" })
-            .eq("id", r.id);
-          log.push(`   ✓ Cancelado automaticamente: ${r.guest_name} (${r.check_in}) — check-out já passou`);
-          cancelled++;
-        }
+        // Antes havia aqui um bloco que CANCELAVA toda reserva com check-out
+        // passado (achado I1). Removido: estadia terminada não é cancelamento.
 
         // ── ADIÇÃO: insere reservas novas que ainda não estão no banco ──────
         for (const ev of evts) {
           for (const targetRoom of targetRooms) {
-            const roomUid = `${source}-${targetRoom}-${ev.uid}`;
+            const roomUid = icalReconcile.rowKey(source, targetRoom, ev.uid);
             const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).maybeSingle();
             if (exists) continue;
-            await supabase.from("reservations").insert({
+            const { error: insErr } = await supabase.from("reservations").insert({
               id: genId(), room_id: targetRoom, external_uid: roomUid, status: "confirmed",
               guest_name:  ev.summary || `${source} reserva`,
               check_in:    ev.checkIn,
@@ -618,8 +608,55 @@ async function runSync() {
                    : "Importado via iCal",
               created_at: new Date().toISOString(),
             });
+            if (insErr) {
+              // Antes o erro era ignorado em silêncio (achado I3).
+              failed++;
+              console.error(`[runSync] Falha ao importar ${source}/${roomId} quarto=${targetRoom} ` +
+                            `periodo=${ev.checkIn}..${ev.checkOut}: ${insErr.code || insErr.message || "erro"}`);
+              log.push(`   ✗ Não importado: Qto ${targetRoom} (${ev.checkIn} → ${ev.checkOut})`);
+              continue;
+            }
             log.push(`   ✓ Novo: Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
             added++;
+          }
+        }
+
+        // ── RECONCILIAÇÃO: datas alteradas e reservas que sumiram do feed ───
+        if (mode !== "off") {
+          const { data: rows, error: rowsErr } = await supabase.from("reservations")
+            .select("id, room_id, external_uid, check_in, check_out, notes")
+            .eq("source", source).eq("status", "confirmed")
+            .in("room_id", targetRooms).gte("check_out", today);
+          if (rowsErr) throw new Error("falha ao ler reservas para reconciliar");
+          const plan = icalReconcile.planReconcile({
+            source, feedRoomId: roomId, events: evts, rows, today, missingCounts: icalMissingCounts,
+          });
+          if (plan.skipped) {
+            console.warn(`[ical-reconcile] ${source}/${roomId}: pulado (${plan.skipped})`);
+          } else {
+            for (const [k, v] of plan.nextCounts) icalMissingCounts.set(k, v);
+            for (const r of rows || []) if (!plan.nextCounts.has(r.id)) icalMissingCounts.delete(r.id);
+            // Log só com ids, quartos e datas.
+            console.log(`[ical-reconcile] (${mode}) ${source}/${roomId}: ` +
+              `atualizar=${plan.updates.length} cancelar=${plan.cancels.length} aguardando=${plan.pending.length}` +
+              (plan.updates.length ? ` | datas: ${plan.updates.map(u => `${u.id}@${u.room_id} ${u.from.join("..")}->${u.to.join("..")}`).join(", ")}` : "") +
+              (plan.cancels.length ? ` | cancelar: ${plan.cancels.map(c => `${c.id}@${c.room_id}`).join(", ")}` : ""));
+            if (mode === "apply") {
+              for (const u of plan.updates) {
+                const { error } = await supabase.from("reservations")
+                  .update({ check_in: u.to[0], check_out: u.to[1] }).eq("id", u.id).eq("status", "confirmed");
+                if (error) { failed++; console.error(`[ical-reconcile] falha ao atualizar ${u.id}: ${error.code || error.message}`); }
+                else { updated++; log.push(`   ↻ Datas alteradas: Qto ${u.room_id} ${u.from.join(" → ")} ⇒ ${u.to.join(" → ")}`); }
+              }
+              for (const c of plan.cancels) {
+                const { error } = await supabase.from("reservations")
+                  .update({ status: "cancelled" }).eq("id", c.id).eq("status", "confirmed");
+                if (error) { failed++; console.error(`[ical-reconcile] falha ao cancelar ${c.id}: ${error.code || error.message}`); }
+                else { cancelled++; icalMissingCounts.delete(c.id); log.push(`   ✕ Saiu do calendário: Qto ${c.room_id} (${c.id})`); }
+              }
+            } else if (plan.updates.length || plan.cancels.length) {
+              log.push(`   ℹ️ Modo relatório: ${plan.updates.length} alteração(ões) de data e ${plan.cancels.length} cancelamento(s) seriam aplicados`);
+            }
           }
         }
       } catch(e) { log.push(`   ✗ Erro: ${e.message}`); }
@@ -628,9 +665,11 @@ async function runSync() {
 
   const parts = [];
   if (added)     parts.push(`${added} nova(s)`);
+  if (updated)   parts.push(`${updated} com datas alteradas`);
   if (cancelled) parts.push(`${cancelled} cancelada(s)`);
+  if (failed)    parts.push(`${failed} falha(s)`);
   log.push(`✅ Concluído${parts.length ? ` — ${parts.join(", ")}` : " — nenhuma novidade"}`);
-  return { log, added, cancelled };
+  return { log, added, cancelled, updated, failed };
   } finally { isSyncing = false; }
 }
 
@@ -1009,7 +1048,11 @@ app.get("*", (req, res) => {
 
 // Exporta o app para os testes; só abre a porta e agenda o sync quando
 // executado diretamente (node server.js / npm start).
-module.exports = { app, _setSupabaseForTests: (client) => { supabase = client; } };
+module.exports = {
+  app, runSync,
+  _setSupabaseForTests: (client) => { supabase = client; },
+  _resetIcalStateForTests: () => icalMissingCounts.clear(),
+};
 if (require.main === module) app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ PMS Pousada rodando na porta ${PORT}`);
 
