@@ -1145,6 +1145,30 @@ function resRow(r) {
 
 // ─── SYNC VIEW ────────────────────────────────────────────────────────────────
 // ─── HÓSPEDES VIEW ────────────────────────────────────────────────────────────
+// Reservas ligadas a um hóspede: mesmo nome (sem diferença de maiúsculas/espaços)
+// ou mesmo telefone com pelo menos 8 dígitos. Antes, telefone vazio casava com
+// todas as reservas sem telefone (as importadas), e a contagem ia a centenas.
+const onlyDigits = s => String(s || "").replace(/\D/g, "");
+const normName   = s => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+function reservationsOfGuest(g) {
+  const name  = normName(g.name);
+  const phone = onlyDigits(g.phone);
+  if (!name && phone.length < 8) return [];
+  return reservations.filter(r =>
+    (name && normName(r.guestName) === name) ||
+    (phone.length >= 8 && onlyDigits(r.phone) === phone));
+}
+// Conta estadias, não linhas: Casa Fechada (9 linhas) e 11+12 (2 linhas) contam uma vez.
+function guestStayCount(g) {
+  const keys = new Set();
+  for (const r of reservationsOfGuest(g)) {
+    if (r.status === "cancelled") continue;
+    const m = (r.notes || "").match(/\[(Casa toda|Suíte grupo):([^\]]+)\]/);
+    keys.add(m ? m[1] + ":" + m[2] : r.id);
+  }
+  return keys.size;
+}
+
 function renderHospedes() {
   const q = guestSearch.toLowerCase();
   const list = q
@@ -1175,9 +1199,7 @@ function renderHospedes() {
 
   html += `<div style="display:flex;flex-direction:column;gap:8px">`;
   list.forEach(g => {
-    const resCount = reservations.filter(r =>
-      r.guestName === g.name || r.phone === g.phone
-    ).length;
+    const resCount = guestStayCount(g);
     html += `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;
       padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer"
       onclick="openGuestModal('${g.id}')">
@@ -1208,9 +1230,7 @@ function openGuestModal(guestId) {
   const g = guestId ? (guests.find(x => x.id === guestId) || {}) : {};
   const isEdit = !!guestId;
   // reservas vinculadas a esse hóspede
-  const guestRes = isEdit ? reservations.filter(r =>
-    r.guestName === g.name || (g.phone && r.phone === g.phone)
-  ) : [];
+  const guestRes = isEdit ? reservationsOfGuest(g) : [];
 
   document.getElementById("modal-title").innerHTML =
     `${isEdit?"👤 Editar Hóspede":"👤 Novo Hóspede"} <button onclick="closeModal()">×</button>`;
