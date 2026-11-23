@@ -41,6 +41,21 @@ function availabilityMode() {
 
 app.use(express.json({ limit: "256kb" })); // previne DoS via payload gigante
 
+// Express 4 não captura erros de handlers async: uma exceção virava
+// "unhandledRejection" e o Node derrubava o processo (PMS fora do ar até o
+// Render reiniciar). Aqui todo handler de rota passa a encaminhar o erro para
+// o tratador no fim do arquivo, que responde 500 sem detalhes internos.
+const asyncSafe = (fn) => function (req, res, next) {
+  try { return Promise.resolve(fn.call(this, req, res, next)).catch(next); }
+  catch (e) { return next(e); }
+};
+for (const method of ["get", "post", "put", "delete", "patch"]) {
+  const original = app[method].bind(app);
+  app[method] = (route, ...handlers) => handlers.length === 0
+    ? original(route) // app.get("setting") é leitura de configuração, não rota
+    : original(route, ...handlers.map(h => (typeof h === "function" && h.length < 4 ? asyncSafe(h) : h)));
+}
+
 // ── Rate limiting simples para /login ─────────────────────────────────────────
 const loginAttempts = new Map();
 function checkLoginRate(ip) {
@@ -100,19 +115,41 @@ function adminOnly(req, res, next) {
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
+// Limite por CONTA, além do limite por IP: o IP vem de X-Forwarded-For, que o
+// cliente pode forjar. 20 senhas erradas em 15 min para o mesmo usuário
+// bloqueiam novas tentativas dele por 15 min (só falhas contam; acerto zera).
+const loginFailures = new Map();
+const LOGIN_FAIL_WINDOW = 15 * 60 * 1000, LOGIN_FAIL_MAX = 20;
+function recentFailures(user) {
+  const now = Date.now();
+  const list = (loginFailures.get(user) || []).filter(t => now - t < LOGIN_FAIL_WINDOW);
+  if (list.length) loginFailures.set(user, list); else loginFailures.delete(user);
+  return list;
+}
+setInterval(() => { for (const u of [...loginFailures.keys()]) recentFailures(u); }, 30 * 60 * 1000).unref();
+
 app.post("/login", async (req, res) => {
   const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
   const ip = String(rawIp).split(",")[0].trim();
   if (!checkLoginRate(ip))
     return res.status(429).json({ error: "Muitas tentativas. Aguarde 15 minutos." });
   const { username, password } = req.body || {};
-  if (!username || !password)
+  if (typeof username !== "string" || typeof password !== "string" || !username || !password ||
+      username.length > 100 || password.length > 200)
     return res.status(400).json({ error: "Usuário e senha obrigatórios" });
+  const uname = username.trim().toLowerCase();
+  if (recentFailures(uname).length >= LOGIN_FAIL_MAX)
+    return res.status(429).json({ error: "Muitas tentativas. Aguarde 15 minutos." });
+  const fail = () => {
+    loginFailures.set(uname, [...recentFailures(uname), Date.now()]);
+    return res.status(401).json({ error: "Credenciais inválidas" });
+  };
   const { data: user } = await supabase
-    .from("users").select("*").eq("username", username.toLowerCase()).single();
-  if (!user) return res.status(401).json({ error: "Credenciais inválidas" });
+    .from("users").select("*").eq("username", uname).maybeSingle();
+  if (!user || typeof user.password_hash !== "string") return fail();
   const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) return res.status(401).json({ error: "Credenciais inválidas" });
+  if (!valid) return fail();
+  loginFailures.delete(uname);
   const token = jwt.sign(
     { userId: user.id, role: user.role, username: user.username },
     JWT_SECRET, { expiresIn: "30d", algorithm: "HS256" }
@@ -1087,6 +1124,15 @@ app.get("*", (req, res) => {
   const idx = path.join(__dirname, "build", "index.html");
   if (fs.existsSync(idx)) res.sendFile(idx);
   else res.send("PMS Pousada — servidor OK 🏡");
+});
+
+// Tratador final de erros: registra no log e responde 500 genérico, sem
+// expor detalhes internos. O processo continua no ar.
+app.use((err, req, res, next) => {
+  console.error(`[erro] ${req.method} ${req.path}: ${err && err.message ? err.message : err}`);
+  if (res.headersSent) return next(err);
+  res.status(err && err.type === "entity.parse.failed" ? 400 : 500)
+     .json({ error: err && err.type === "entity.parse.failed" ? "JSON inválido" : "Erro interno" });
 });
 
 // Exporta o app para os testes; só abre a porta e agenda o sync quando
