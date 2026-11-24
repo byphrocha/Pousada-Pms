@@ -218,8 +218,8 @@ test("tela: quadro de pagamentos mostra contratado, recebido, saldo e parcela ve
       scheduled: 6000, unscheduled: 0, overdue: ["p2"] },
     payments: [{ id: "p1", kind: "sinal", amount: 3000, paid_at: "2030-01-05", method: "pix" },
                { id: "p2", kind: "parcela", amount: 3000, due_date: "2000-01-01", paid_at: null }] }, "cf0")`);
-  assert.match(html, /CONTRATADO[\s\S]*9\.000,00/);
-  assert.match(html, /SALDO[\s\S]*6\.000,00/);
+  assert.match(html, /Contratado[\s\S]*9\.000,00/);
+  assert.match(html, /Saldo[\s\S]*6\.000,00/);
   assert.match(html, /vencida/);
   assert.match(html, /Recebido hoje/);
 });
