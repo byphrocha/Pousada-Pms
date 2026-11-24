@@ -11,6 +11,7 @@ const availability = require("./lib/availability");
 const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
 const groups = require("./lib/groups");
+const reservationInput = require("./lib/reservation-input");
 const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
@@ -586,6 +587,8 @@ app.post("/reservations", authMiddleware, async (req, res) => {
   // Valida campos obrigatórios
   if (!b.guestName || !b.checkIn || !b.checkOut || !b.roomId)
     return res.status(400).json({ error: "guestName, checkIn, checkOut e roomId são obrigatórios" });
+  const badInput = reservationInput.checkReservationInput(b);
+  if (badInput) return res.status(400).json({ error: badInput });
   if (!isValidDate(b.checkIn) || !isValidDate(b.checkOut))
     return res.status(400).json({ error: "checkIn e checkOut devem estar no formato YYYY-MM-DD" });
   if (b.checkOut <= b.checkIn)
@@ -623,7 +626,7 @@ function buildReservationRow(b) {
     check_in:     b.checkIn,
     check_out:    b.checkOut,
     source:       ["direto","booking","airbnb"].includes(b.source) ? b.source : "direto",
-    adults:       Math.max(1, Math.min(40, parseInt(b.adults)  || 2)),
+    adults:       b.adults === undefined || b.adults === "" || b.adults === null ? 2 : Math.max(1, Math.min(40, parseInt(b.adults))),
     children:     Math.max(0, Math.min(20, parseInt(b.children)|| 0)),
     phone:        String(b.phone  || "").slice(0, 30),
     notes:        String(b.notes  || "").slice(0, 2000),
@@ -670,6 +673,10 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
   if (!same) return res.status(400).json({ error: "Todas as linhas precisam ter o mesmo hóspede, datas e status" });
   if (list.some(b => b.externalUid))
     return res.status(400).json({ error: "Reservas importadas não usam esta rota" });
+  for (const b of list) {
+    const badInput = reservationInput.checkReservationInput(b);
+    if (badInput) return res.status(400).json({ error: badInput });
+  }
   const ids = list.map(b => b.id).filter(Boolean).map(String);
   if (new Set(ids).size !== ids.length)
     return res.status(400).json({ error: "ids repetidos" });
@@ -751,13 +758,15 @@ async function updateGroup(req, res, row, me, members, before, auditOn) {
 
 app.put("/reservations/:id", authMiddleware, async (req, res) => {
   const b   = req.body || {};
+  const badInput = reservationInput.checkReservationInput(b, { partial: true });
+  if (badInput) return res.status(400).json({ error: badInput });
   const row = {};
   if (b.roomId    !== undefined) row.room_id    = String(b.roomId).slice(0, 10);
   if (b.guestName !== undefined) row.guest_name = String(b.guestName).slice(0, 200);
   if (b.checkIn   !== undefined) row.check_in   = b.checkIn;
   if (b.checkOut  !== undefined) row.check_out  = b.checkOut;
   if (b.source    !== undefined) row.source     = ["direto","booking","airbnb"].includes(b.source) ? b.source : "direto";
-  if (b.adults    !== undefined) row.adults     = Math.max(1, Math.min(40, parseInt(b.adults)  || 2));
+  if (b.adults    !== undefined) row.adults     = b.adults === "" || b.adults === null ? 2 : Math.max(1, Math.min(40, parseInt(b.adults)));
   if (b.children  !== undefined) row.children   = Math.max(0, Math.min(20, parseInt(b.children)|| 0));
   if (b.phone     !== undefined) row.phone      = String(b.phone  || "").slice(0, 30);
   if (b.notes     !== undefined) row.notes      = String(b.notes  || "").slice(0, 2000);
