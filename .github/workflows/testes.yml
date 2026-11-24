@@ -55,3 +55,14 @@ jobs:
           PGUSER: postgres
           PGPASSWORD: ensaio-descartavel
           PGDATABASE: ensaio
+      # Restaura um backup FICTÍCIO no banco recém-migrado e confere o conteúdo.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: scripts/ensaio-restauracao.sh
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: ensaio-descartavel
+          PGDATABASE: ensaio

@@ -54,6 +54,8 @@ const ROTAS = [
   ["PUT",    "/reservations/r1",            "todos",  { notes: "obs" }],
   ["DELETE", "/reservations/r1",            "admin"],
   ["GET",    "/urls",                       "admin"],
+  ["GET",    "/admin/backup",               "admin"],
+  ["GET",    "/admin/backup/status",        "admin"],
   ["POST",   "/urls",                       "admin",  { airbnb: {}, booking: {} }],
   ["GET",    "/sync/status",                "todos"],
   ["POST",   "/sync",                       "admin"],
