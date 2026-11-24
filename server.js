@@ -18,6 +18,8 @@ const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
 const feedAccess = require("./lib/feed-access");
 const backupLib = require("./lib/backup");
+const webpush = require("./lib/webpush");
+const pushAlerts = require("./lib/push-alerts");
 const reports = require("./lib/reports");
 
 const app  = express();
@@ -1144,10 +1146,121 @@ async function saveSyncStatus(run) {
     if (error) throw new Error(error.code || error.message || "erro");
     const bad = Object.entries(value.feeds).filter(([, f]) => f.problem);
     if (bad.length) console.warn(`[sync-status] calendários com problema: ${bad.map(([k, f]) => `${k} (${f.problem})`).join(", ")}`);
+    await notifyNewConflicts(value);
   } catch (e) {
     console.error(`[sync-status] não foi possível gravar o status: ${e.message}`);
   }
 }
+
+// ── AVISOS NO CELULAR (Web Push) ─────────────────────────────────────────────
+// Push VAZIO autenticado com VAPID; o app busca o texto em POST /push/inbox.
+// Sem VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY no Render, fica tudo desligado.
+const PUSH_SUBS_KEY = "push_subscriptions";
+const PUSH_NOTIFIED_KEY = "push_notified";
+const pushInboxKey = (id) => `push_inbox:${id}`;
+const pushSubId = (endpoint) => crypto.createHash("sha256").update(String(endpoint)).digest("hex").slice(0, 16);
+function vapidConfig() {
+  const publicKey = process.env.VAPID_PUBLIC_KEY || "", privateKey = process.env.VAPID_PRIVATE_KEY || "";
+  if (!publicKey || !privateKey || !webpush.vapidKeysValid(publicKey, privateKey)) return null;
+  return { publicKey, privateKey, subject: process.env.VAPID_SUBJECT || process.env.RENDER_EXTERNAL_URL || "https://pousada-pms-209a.onrender.com" };
+}
+let pushFetch = (...a) => fetch(...a); // trocado nos testes
+async function loadPushSubs() {
+  const { data, error } = await supabase.from("settings").select("value").eq("key", PUSH_SUBS_KEY).maybeSingle();
+  if (error) throw new Error(error.code || error.message || "erro");
+  return Array.isArray(data && data.value && data.value.list) ? data.value.list : [];
+}
+async function savePushSubs(list) {
+  const { error } = await supabase.from("settings").upsert({ key: PUSH_SUBS_KEY, value: { list } });
+  if (error) throw new Error(error.code || error.message || "erro");
+}
+// Guarda a mensagem na caixa de cada aparelho e manda o push. Nunca lança.
+async function pushToAll(message) {
+  const vapid = vapidConfig();
+  if (!vapid) return { sent: 0, failed: 0, disabled: true };
+  let subs;
+  try { subs = await loadPushSubs(); } catch (e) { console.error(`[push] falha ao ler aparelhos: ${e.message}`); return { sent: 0, failed: 1 }; }
+  let sent = 0, failed = 0;
+  const gone = new Set();
+  for (const sub of subs) {
+    const key = pushInboxKey(sub.id);
+    const { data } = await supabase.from("settings").select("value").eq("key", key).maybeSingle();
+    const inbox = Array.isArray(data && data.value) ? data.value : [];
+    const { error } = await supabase.from("settings").upsert({ key, value: [...inbox, { ...message, at: new Date().toISOString() }].slice(-10) });
+    if (error) { failed++; continue; }
+    const r = await webpush.sendEmptyPush(sub.endpoint, vapid, pushFetch);
+    if (r === "ok") sent++;
+    else if (r === "gone") gone.add(sub.id);
+    else failed++;
+  }
+  if (gone.size) {
+    try { await savePushSubs(subs.filter(s => !gone.has(s.id))); } catch (e) { console.error(`[push] falha ao remover aparelho: ${e.message}`); }
+  }
+  if (failed) console.error(`[push] ${failed} aviso(s) não enviado(s)`);
+  return { sent, failed, removed: gone.size };
+}
+async function notifyNewConflicts(status) {
+  if (!vapidConfig()) return;
+  const { data, error } = await supabase.from("settings").select("value").eq("key", PUSH_NOTIFIED_KEY).maybeSingle();
+  if (error) { console.error(`[push] falha ao ler avisos já enviados: ${error.code || error.message}`); return; }
+  const { fresh, notified } = pushAlerts.diffConflicts(status, data && data.value && data.value.keys);
+  for (const c of fresh) await pushToAll(pushAlerts.conflictMessage(c));
+  const { error: e2 } = await supabase.from("settings").upsert({ key: PUSH_NOTIFIED_KEY, value: { keys: notified } });
+  if (e2) console.error(`[push] falha ao registrar avisos enviados: ${e2.code || e2.message}`);
+}
+
+app.get("/push/config", authMiddleware, (req, res) => {
+  const v = vapidConfig();
+  res.json({ enabled: !!v, publicKey: v ? v.publicKey : null });
+});
+app.post("/push/subscribe", authMiddleware, adminOnly, async (req, res) => {
+  if (!vapidConfig()) return res.status(503).json({ error: "Avisos ainda não configurados no servidor." });
+  const endpoint = req.body && req.body.endpoint;
+  if (!webpush.endpointAllowed(endpoint)) return res.status(400).json({ error: "Aparelho não suportado." });
+  try {
+    const id = pushSubId(endpoint);
+    const list = (await loadPushSubs()).filter(s => s.id !== id);
+    list.push({ id, endpoint, userId: req.user.id, createdAt: new Date().toISOString() });
+    await savePushSubs(list.slice(-10));
+    await audit(req, "push.ativar", "push", id, null, {});
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(`[push] falha ao ativar: ${e.message}`);
+    res.status(503).json({ error: "Não foi possível ativar os avisos agora." });
+  }
+});
+app.post("/push/unsubscribe", authMiddleware, adminOnly, async (req, res) => {
+  const id = pushSubId(req.body && req.body.endpoint);
+  try {
+    await savePushSubs((await loadPushSubs()).filter(s => s.id !== id));
+    await supabase.from("settings").delete().eq("key", pushInboxKey(id));
+    await audit(req, "push.desativar", "push", id, null, {});
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ error: "Não foi possível desativar os avisos agora." });
+  }
+});
+app.post("/push/test", authMiddleware, adminOnly, async (req, res) => {
+  const r = await pushToAll({ title: "🔔 Teste da PMS", body: "Os avisos estão funcionando neste aparelho." });
+  if (r.disabled) return res.status(503).json({ error: "Avisos ainda não configurados no servidor." });
+  res.json(r);
+});
+// Chamado pelo service worker, sem login: o endpoint do aparelho (secreto, só o
+// aparelho e a PMS conhecem) é a credencial. Devolve e esvazia a caixa.
+app.post("/push/inbox", async (req, res) => {
+  const endpoint = req.body && req.body.endpoint;
+  if (!webpush.endpointAllowed(endpoint)) return res.status(404).json({ messages: [] });
+  let subs;
+  try { subs = await loadPushSubs(); } catch { return res.status(503).json({ messages: [] }); }
+  const sub = subs.find(s => s.endpoint === endpoint);
+  if (!sub) return res.status(404).json({ messages: [] });
+  const key = pushInboxKey(sub.id);
+  const { data } = await supabase.from("settings").select("value").eq("key", key).maybeSingle();
+  const messages = Array.isArray(data && data.value) ? data.value : [];
+  if (messages.length) await supabase.from("settings").upsert({ key, value: [] });
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ messages });
+});
 
 // Situação dos calendários para a tela (todos os perfis): sem URL, sem dados de hóspede.
 app.get("/sync/status", authMiddleware, async (req, res) => {
@@ -1981,8 +2094,9 @@ app.use((err, req, res, next) => {
 
 // Exporta o app para os testes; só abre a porta e agenda o sync quando
 // executado diretamente (node server.js / npm start).
+function _setPushFetchForTests(f) { pushFetch = f; }
 module.exports = {
-  app, runSync,
+  app, runSync, _setPushFetchForTests,
   _flushFeedAccessForTests: () => flushFeedAccess(true),
   _resetFeedAccessForTests: () => { feedPending = {}; feedFlushAt = 0; },
   _setSupabaseForTests: (client) => { supabase = client; sessionCache.clear(); tableCache = new Map(); },
