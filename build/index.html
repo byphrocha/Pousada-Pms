@@ -968,13 +968,7 @@ function render() {
 
   // Badge de alerta no botão ⚠️
   if (authRole === "admin") {
-    const confirmed = reservations.filter(occupies);
-    let alertCount = 0;
-    for (let i = 0; i < confirmed.length; i++)
-      for (let j = i+1; j < confirmed.length; j++) {
-        const a = confirmed[i], b = confirmed[j];
-        if (a.roomId === b.roomId && a.checkIn < b.checkOut && b.checkIn < a.checkOut) alertCount++;
-      }
+    const alertCount = findOverbookings().length;
     navAlertCount = alertCount;
     document.querySelector('.nav-btn[data-view="alertas"]')?.classList.toggle("has-alert", alertCount > 0);
     document.getElementById("nav-more-btn")?.classList.toggle("has-alert", alertCount > 0 && authRole === "admin");
@@ -2079,29 +2073,34 @@ async function deleteTransaction(id) {
 
 
 // ─── ALERTAS VIEW ─────────────────────────────────────────────────────────────
-function renderAlertas() {
-  // Detecta overbooking: mesma sala, datas sobrepostas, fontes diferentes
-  const confirmed = reservations.filter(occupies);
-  const conflicts = [];
-
-  for (let i = 0; i < confirmed.length; i++) {
-    for (let j = i + 1; j < confirmed.length; j++) {
-      const a = confirmed[i], b = confirmed[j];
+// Overbooking que ainda dá para resolver: mesmo quarto, noites em comum, e a
+// última noite em comum é hoje ou depois. Sobreposição que já terminou (ex.:
+// duplicatas antigas de importação do histórico) não vira alerta — era isso que
+// fazia a tela mostrar 85 "conflitos", todos de estadias passadas. Mesma janela
+// da constraint do banco (reservations_no_overlap). [check_in, check_out).
+function findOverbookings(list = reservations, today = todayStr()) {
+  const active = list.filter(r => occupies(r) && r.checkOut > today);
+  const out = [];
+  for (let i = 0; i < active.length; i++)
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i], b = active[j];
       if (a.roomId !== b.roomId) continue;
-      // Sobreposição: a começa antes de b terminar E b começa antes de a terminar
+      // As duas saem depois de hoje, então as noites em comum incluem hoje ou depois.
       if (a.checkIn >= b.checkOut || b.checkIn >= a.checkOut) continue;
-      // Só alerta se fontes diferentes OU ambas confirmadas do mesmo source (duplicata)
-      const key = [a.id, b.id].sort().join("|");
-      if (!conflicts.find(c => c.key === key)) {
-        conflicts.push({ key, a, b });
-      }
+      out.push({ key: [a.id, b.id].sort().join("|"), a, b });
     }
-  }
+  return out;
+}
+
+function renderAlertas() {
+  const confirmed = reservations.filter(occupies);
+  const conflicts = findOverbookings();
 
   // Também detecta pré-reservas que conflitam com reservas confirmadas
   const preConflicts = [];
   for (const pre of prereservations) {
     if (!pre.check_in || !pre.check_out) continue;
+    if (pre.check_out <= todayStr()) continue; // pré-reserva que já passou não é alerta
     if (pre.status === "recusado") continue;
     const norm = { roomId: pre.room_id, checkIn: pre.check_in, checkOut: pre.check_out };
     const clash = confirmed.find(r =>
@@ -2121,7 +2120,7 @@ function renderAlertas() {
       <div style="font-size:48px;margin-bottom:12px">✅</div>
       <div style="font-size:16px;font-weight:700;color:#22c55e">Nenhum conflito detectado</div>
       <div style="font-size:13px;color:var(--mu);margin-top:6px">
-        Todas as reservas confirmadas estão sem sobreposição de datas.
+        Nenhuma reserva de hoje em diante está sobreposta no mesmo quarto.
       </div>
     </div>`;
   } else {
