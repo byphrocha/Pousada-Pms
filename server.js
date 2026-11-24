@@ -10,6 +10,7 @@ const { createClient } = require("@supabase/supabase-js");
 const availability = require("./lib/availability");
 const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
+const groups = require("./lib/groups");
 const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
@@ -681,6 +682,12 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
 
   const rows = list.map(buildReservationRow);
   if (!isAdmin(req)) for (const r of rows) { r.amount = 0; r.payment = "pix"; }
+  // PMS-006: todas as linhas ganham o mesmo group_id (o da marca nas notas, para
+  // bater com o backfill; senão um novo).
+  if (await groupsEnabled()) {
+    const gid = groups.groupIdFromNotes(first.notes) || `${product === "CF" ? "cf" : "suite"}:${genId()}`;
+    for (const r of rows) r.group_id = gid;
+  }
   // F3: o valor do contrato fica só na 1ª linha (antes era copiado nas 9 linhas da CF,
   // o que multiplicava o valor em qualquer soma). Pagamentos se ligam a essa linha.
   for (const r of rows.slice(1)) r.amount = 0;
@@ -697,6 +704,50 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
   const byId = new Map((data || []).map(r => [String(r.id), r]));
   res.json({ ok: true, product, reservations: rows.map(r => reservationForRole(req, byId.get(String(r.id)) || r)) });
 });
+
+// Edição de uma linha que faz parte de um grupo (PMS-006).
+async function updateGroup(req, res, row, me, members, before, auditOn) {
+  const label = String(me.group_id).startsWith("cf:") ? "Casa Fechada" : "suíte 11+12";
+  if ("room_id" in row && row.room_id !== String(me.room_id))
+    return res.status(400).json({ error: `Esta reserva faz parte da ${label}: não dá para trocar o quarto de uma linha só. Cancele e crie de novo.` });
+  delete row.room_id;
+  const { group, own } = groups.splitGroupUpdate(row);
+  const ids = members.map(m => String(m.id));
+  const rooms = [...new Set(members.map(m => String(m.room_id)))];
+  const lead = members.find(m => String(m.id) === String(me.id)) || members[0];
+  const next = {
+    check_in:  group.check_in  ?? String(lead.check_in).slice(0, 10),
+    check_out: group.check_out ?? String(lead.check_out).slice(0, 10),
+    status:    group.status    ?? lead.status,
+  };
+  if ("check_in" in group || "check_out" in group) {
+    const invalid = availability.validateStay(next.check_in, next.check_out);
+    if (invalid) return res.status(400).json({ error: invalid });
+  }
+  if (["check_in", "check_out", "status"].some(k => k in group) && availability.isBlocking(next.status)) {
+    const blocked = await guardAvailability(
+      { rooms, checkIn: next.check_in, checkOut: next.check_out, ignoreIds: ids }, "PUT /reservations/:id (grupo)");
+    if (blocked) return res.status(blocked.status).json(blocked.body);
+  }
+  if (Object.keys(group).length) {
+    // Um UPDATE só para todas as linhas do grupo: o Postgres aplica tudo ou nada.
+    const { error } = await supabase.from("reservations").update(group).eq("group_id", me.group_id);
+    if (isOverlapError(error))
+      return overlapResponse(res, rooms, { checkIn: next.check_in, checkOut: next.check_out, ignoreIds: ids }, "PUT /reservations/:id (grupo)");
+    if (error) return res.status(500).json({ error: "Não foi possível salvar o grupo. Nada foi alterado." });
+  }
+  if (Object.keys(own).length) {
+    const { error } = await supabase.from("reservations").update(own).eq("id", req.params.id);
+    if (error) return res.status(500).json({ error: "As datas do grupo foram salvas, mas os demais campos desta linha não. Tente salvar de novo." });
+  }
+  if (auditOn && before) {
+    const changes = auditLib.diff(before, { ...group, ...own });
+    if (Object.keys(changes).length)
+      await audit(req, auditLib.reservationAction(changes), "reservation", req.params.id, req.params.id,
+        { ...changes, quartos: [null, rooms.length] });
+  }
+  res.json({ ok: true, group: { id: me.group_id, rooms } });
+}
 
 app.put("/reservations/:id", authMiddleware, async (req, res) => {
   const b   = req.body || {};
@@ -722,6 +773,21 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
   const before = auditOn
     ? (await supabase.from("reservations").select("*").eq("id", req.params.id).maybeSingle()).data
     : null;
+
+  // PMS-006: linha de Casa Fechada / 11+12 → datas, status, nome, telefone e canal
+  // valem para o grupo inteiro, num único UPDATE (tudo ou nada).
+  if (await groupsEnabled()) {
+    const { data: me, error: meErr } = await supabase.from("reservations")
+      .select("id, group_id, room_id").eq("id", req.params.id).maybeSingle();
+    if (meErr) return res.status(500).json({ error: "Não foi possível ler a reserva" });
+    if (!me) return res.status(404).json({ error: "Reserva não encontrada" });
+    if (me.group_id) {
+      const { data: members, error: mErr } = await supabase.from("reservations")
+        .select("id, room_id, check_in, check_out, status").eq("group_id", me.group_id);
+      if (mErr) return res.status(500).json({ error: "Não foi possível ler o grupo da reserva" });
+      if ((members || []).length > 1) return updateGroup(req, res, row, me, members, before, auditOn);
+    }
+  }
 
   // Mudança de quarto, datas ou status: valida o resultado final da reserva
   // (antes o PUT aceitava qualquer data, inclusive saída antes da entrada — D2).
@@ -836,6 +902,7 @@ async function runSync({ fetcher = fetchUrl } = {}) {
   let added = 0, cancelled = 0, updated = 0, failed = 0;
   const feedResults = []; // resumo por calendário para o status (PMS-011)
   try {
+  const groupsOn = await groupsEnabled();
   const { data: settingRow, error: urlsErr } = await supabase.from("settings").select("value").eq("key", "ical_urls").maybeSingle();
   if (urlsErr) {
     // Sem a lista de calendários não houve sincronização: não grava status
@@ -880,7 +947,9 @@ async function runSync({ fetcher = fetchUrl } = {}) {
             const roomUid = icalReconcile.rowKey(source, targetRoom, ev.uid);
             const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).maybeSingle();
             if (exists) continue;
+            const importGroup = groupsOn ? groups.groupIdForImport(source, roomId, ev.uid) : null;
             const { error: insErr } = await supabase.from("reservations").insert({
+              ...(importGroup ? { group_id: importGroup } : {}),
               id: genId(), room_id: targetRoom, external_uid: roomUid, status: "confirmed",
               guest_name:  ev.summary || `${source} reserva`,
               check_in:    ev.checkIn,
@@ -1224,6 +1293,21 @@ async function tableEnabled(name) {
   return !error;
 }
 const paymentsEnabled = () => tableEnabled("payments");
+
+// Coluna nova existe? (PMS-006: reservations.group_id). Sem ela, tudo segue
+// como antes da migration. Mesmo cache de 60 s das tabelas.
+async function columnEnabled(table, column) {
+  const key = `col:${table}.${column}`;
+  const hit = tableCache.get(key);
+  if (hit && Date.now() - hit.at < 60 * 1000) return hit.enabled;
+  const { error } = await supabase.from(table).select(column).limit(1);
+  const missing = error && (error.code === "42703" || error.code === "PGRST204" ||
+    /column .* does not exist|could not find .* column/i.test(error.message || ""));
+  if (error && !missing) { console.error(`[${key}] não foi possível verificar a coluna: ${error.code || error.message}`); return false; }
+  tableCache.set(key, { at: Date.now(), enabled: !error });
+  return !error;
+}
+const groupsEnabled = () => columnEnabled("reservations", "group_id");
 
 // Auditoria (PMS-014): registra depois do sucesso; falhar aqui NUNCA desfaz nem
 // impede a operação, só vai para o log (sem dados pessoais).
