@@ -34,7 +34,7 @@ test("mergeStatus: falha mantém o último sucesso anterior; calendário removid
   assert.equal(s1.lastRunOk, true);
   const T1 = "2030-01-10T12:15:00.000Z";
   const s2 = S.mergeStatus(s1, { feeds: [{ key: "airbnb/21", ok: false, problem: "HTTP 503" }] }, T1);
-  assert.deepEqual(s2.feeds["airbnb/21"], { lastAttemptAt: T1, lastSuccessAt: T0, problem: "HTTP 503", events: 3, conflicts: [] });
+  assert.deepEqual(s2.feeds["airbnb/21"], { lastAttemptAt: T1, lastSuccessAt: T0, problem: "HTTP 503", events: 3, conflicts: [], echoes: [] });
   assert.equal(s2.feeds["booking/20"], undefined, "não configurado mais");
   assert.equal(s2.lastRunOk, false);
 });

@@ -682,6 +682,15 @@ function fmtWhen(iso) {
   return sameDay ? `às ${hm}` : `em ${d.toLocaleDateString("pt-BR", { day:"2-digit", month:"2-digit" })} ${hm}`;
 }
 
+// Fechamentos que a plataforma devolveu depois de ler o link da PMS (eco). Não
+// é falha e não vai para o aviso do topo, mas fica visível em Sincronizar.
+function echoNote(echoes) {
+  if (!Array.isArray(echoes) || !echoes.length) return null;
+  return "ℹ️ Datas que a plataforma devolveu fechadas depois de receber da PMS: " +
+    echoes.map(e => `${feedLabel(e.feed).split(" ")[0]} ${e.room === "CF" ? "Casa Fechada" : e.room === "11+12" ? "suíte 11+12" : "quarto " + e.room}, ${fmtDate(e.checkIn)} → ${fmtDate(e.checkOut)}`).join("; ") +
+    ". Já estão ocupadas na PMS, por isso não entram de novo. Se alguma for reserva de verdade no extranet, é overbooking: resolva na plataforma.";
+}
+
 // Texto do aviso de calendários, ou null se está tudo em dia.
 function syncWarning() {
   const h = syncHealth;
@@ -2705,6 +2714,8 @@ function renderSync() {
       : syncHealth.ok ? `✅ Última sincronização ${fmtWhen(syncHealth.lastRunAt)}: todos os calendários em dia.`
       : `⚠️ ${syncWarning()}`;
     html+=`<div style="font-size:12px;color:var(--dm);margin-bottom:12px">${esc(okLine)}</div>`;
+    const echo = echoNote(syncHealth.echoes);
+    if (echo) html+=`<div style="font-size:12px;color:var(--dm);margin:-4px 0 12px;line-height:1.6">${esc(echo)}</div>`;
   }
   html+=`<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
     <button class="btn btn-green" onclick="saveUrls()">💾 Salvar URLs</button>
