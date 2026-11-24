@@ -1022,6 +1022,62 @@ function showView(v) {
   currentView = v;
   render();
   if (v === "relatorios" && authRole === "admin") loadReport(reportMonth);
+  if (v === "alertas" && authRole === "admin") loadBackupStatus();
+}
+
+// ─── BACKUP (Supabase Free não faz backup automático) ─────────────────────────
+// O admin baixa um arquivo com todas as tabelas e guarda em lugar privado.
+// O aviso fica amarelo depois de BACKUP_MAX_DAYS dias sem backup.
+const BACKUP_MAX_DAYS = 7;
+let backupStatus = { state: "idle", lastAt: null, error: null };
+async function loadBackupStatus() {
+  backupStatus = { ...backupStatus, state: "loading" };
+  const r = await api("GET", "/admin/backup/status");
+  backupStatus = r && !r.error && "lastAt" in r
+    ? { state: "ok", lastAt: r.lastAt, error: null }
+    : { state: "error", lastAt: null, error: apiErrorMessage(r) || "não foi possível consultar" };
+  if (currentView === "alertas") render();
+}
+function backupAgeDays(lastAt, now = Date.now()) {
+  if (!lastAt) return null;
+  const t = Date.parse(lastAt);
+  return Number.isFinite(t) ? Math.floor((now - t) / 86400000) : null;
+}
+function backupCardHtml() {
+  const st = backupStatus;
+  const days = backupAgeDays(st.lastAt);
+  const late = st.state === "ok" && (days === null || days >= BACKUP_MAX_DAYS);
+  const line = st.state === "loading" ? "Consultando…"
+    : st.state === "error" ? "Não foi possível consultar a data do último backup (" + st.error + ")."
+    : st.state !== "ok" ? ""
+    : days === null ? "Nenhum backup feito pela PMS ainda."
+    : `Último backup: ${new Date(st.lastAt).toLocaleDateString("pt-BR")} (${days === 0 ? "hoje" : days === 1 ? "ontem" : "há " + days + " dias"}).`;
+  const color = late || st.state === "error" ? "#f59e0b" : "var(--dm)";
+  return `<div style="background:var(--bg2);border:1px solid ${late ? "#f59e0b66" : "var(--bd)"};border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:13px;font-weight:700">💾 Backup do banco</div>
+      <div style="font-size:12px;color:${color};margin-top:4px;line-height:1.5">${esc(line)}${late ? " Faça um agora." : ""}</div>
+      <div style="font-size:11px;color:var(--mu);margin-top:4px;line-height:1.5">O arquivo tem dados de hóspedes: guarde fora do celular, em lugar privado. Não envie por WhatsApp nem e-mail.</div>
+    </div>
+    <button class="btn" id="backup-btn" onclick="downloadBackup()">Baixar backup</button>
+  </div>`;
+}
+async function downloadBackup() {
+  const btn = document.getElementById("backup-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Gerando…"; }
+  const r = await api("GET", "/admin/backup");
+  if (!r || r.error || r.format !== "pms-backup") {
+    alert("Backup não gerado: " + (apiErrorMessage(r) || "resposta inesperada") + ". Nada foi baixado.");
+    if (btn) { btn.disabled = false; btn.textContent = "Baixar backup"; }
+    return;
+  }
+  const blob = new Blob([JSON.stringify(r)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `pms-backup-${r.createdAt.slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  await loadBackupStatus();
 }
 
 // ─── CALENDÁRIO DE OCUPAÇÃO (PMS-019) ─────────────────────────────────────────
@@ -2128,7 +2184,7 @@ function renderAlertas() {
 
   const total = conflicts.length + preConflicts.length;
 
-  let html = `<div style="margin-bottom:20px">`;
+  let html = (authRole === "admin" ? backupCardHtml() : "") + `<div style="margin-bottom:20px">`;
 
   if (total === 0) {
     html += `<div style="text-align:center;padding:60px 0">

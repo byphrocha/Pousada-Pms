@@ -51,6 +51,23 @@ Ele aplica baseline e migrations, confere as regras (sobreposição recusada, CF
 RLS em todas as tabelas, auditoria só por inclusão), desfaz tudo com os `.down.sql` e reaplica.
 O CI faz o mesmo em Postgres 17 a cada PR. Migration nova sem `.down.sql` reprova.
 
+## Backup e restauração
+
+O Supabase Free não faz backup automático. Na PMS, **Alertas → 💾 Backup do banco → Baixar backup**
+(só admin) gera `pms-backup-AAAA-MM-DD.json` com todas as tabelas. O aviso fica amarelo depois de 7 dias.
+O arquivo tem dados de hóspedes e hashes de senha: guarde em lugar privado, fora do repositório
+(o `.gitignore` bloqueia `pms-backup-*.json`).
+
+Restaurar num banco **novo** (baseline + migrations aplicados, tabelas vazias):
+
+```bash
+node scripts/restaurar-backup.js pms-backup-AAAA-MM-DD.json > restaurar.sql
+psql "<banco novo>" -v ON_ERROR_STOP=1 -f restaurar.sql
+```
+
+É uma transação só (tudo ou nada) e recusa se alguma tabela já tiver dados. O CI ensaia isso
+com um backup fictício (`scripts/ensaio-restauracao.sh`).
+
 ## Regras para contribuir
 
 - Nunca rode migrations ou scripts de escrita no banco de produção sem backup e restauração testados.

@@ -17,6 +17,7 @@ const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
 const feedAccess = require("./lib/feed-access");
+const backupLib = require("./lib/backup");
 const reports = require("./lib/reports");
 
 const app  = express();
@@ -863,6 +864,37 @@ app.delete("/reservations/:id", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ── URLs iCal ─────────────────────────────────────────────────────────────────
+// ── BACKUP (Supabase Free não tem backup automático) ─────────────────────────
+// Arquivo com todas as tabelas, só para admin. Contém dados de hóspedes e hashes
+// de senha: vai direto para o aparelho de quem pediu, nunca para log ou disco
+// do servidor. Qualquer tabela que falhe → 503, nunca um arquivo pela metade.
+const LAST_BACKUP_KEY = "last_backup";
+app.get("/admin/backup", authMiddleware, adminOnly, async (req, res) => {
+  let backup;
+  try {
+    backup = await backupLib.buildBackup((name, key) =>
+      selectAllPages(() => supabase.from(name).select("*").order(key)));
+  } catch (e) {
+    console.error(`[backup] ${e.message} (${e.code || "sem código"})`);
+    return res.status(503).json({ error: "Não foi possível ler todas as tabelas; nenhum arquivo foi gerado. Tente de novo em instantes." });
+  }
+  // Registro de quando foi feito (sem conteúdo). Se falhar, o arquivo sai igual.
+  const mark = { at: backup.createdAt, by: req.user.username || null, counts: backup.counts };
+  const { error: markErr } = await supabase.from("settings").upsert({ key: LAST_BACKUP_KEY, value: mark });
+  if (markErr) console.error(`[backup] falha ao registrar a data: ${markErr.code || markErr.message}`);
+  await audit(req, "backup", "database", null, null, { counts: backup.counts });
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Disposition", `attachment; filename="pms-backup-${backup.createdAt.slice(0, 10)}.json"`);
+  res.json(backup);
+});
+
+app.get("/admin/backup/status", authMiddleware, adminOnly, async (req, res) => {
+  const { data, error } = await supabase.from("settings").select("value").eq("key", LAST_BACKUP_KEY).maybeSingle();
+  if (error) return res.status(503).json({ error: "Não foi possível ler a data do último backup." });
+  const v = (data && data.value) || null;
+  res.json({ lastAt: v && v.at ? v.at : null, counts: v && v.counts ? v.counts : null });
+});
+
 app.get("/urls", authMiddleware, adminOnly, async (req, res) => {
   const { data } = await supabase.from("settings").select("value").eq("key", "ical_urls").single();
   res.json(data?.value || { booking: {}, airbnb: {} });

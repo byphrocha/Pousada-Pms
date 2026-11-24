@@ -4,3 +4,7 @@ node_modules/
 *.log
 npm-debug.log*
 .DS_Store
+
+# Backups da PMS têm dados de hóspedes: nunca no repositório (é público).
+pms-backup-*.json
+restaurar*.sql
