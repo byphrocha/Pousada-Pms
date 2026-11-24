@@ -54,7 +54,9 @@ function loadFrontend({ fields = {}, routes = [], keep = [] } = {}) {
     calls.push({ method, path: url, body });
     const route = routes.find(r => r.method === method && (typeof r.path === "string" ? r.path === url : r.path.test(url)));
     const out = route ? route.reply({ method, path: url, body, calls }) : { status: 200, json: {} };
-    return { status: out.status, ok: out.status < 400, json: async () => out.json };
+    // out.text: resposta que não é JSON (ex.: página de erro do proxy).
+    return { status: out.status, ok: out.status < 400,
+      json: async () => { if (out.text !== undefined) throw new SyntaxError("Unexpected token < in JSON"); return out.json; } };
   }
 
   const context = vm.createContext({
