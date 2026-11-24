@@ -929,7 +929,7 @@ async function runSync({ fetcher = fetchUrl } = {}) {
     for (const [roomId, url] of Object.entries(urls || {})) {
       if (!url) continue;
       log.push(`🔍 ${source} — Quarto ${roomId}`);
-      const feed = { key: `${source}/${roomId}`, ok: false, problem: null, events: 0, conflicts: [] };
+      const feed = { key: `${source}/${roomId}`, ok: false, problem: null, events: 0, conflicts: [], echoes: [] };
       feedResults.push(feed);
       const failedBefore = failed;
       try {
@@ -956,6 +956,7 @@ async function runSync({ fetcher = fetchUrl } = {}) {
         // Se um quarto estiver ocupado, o banco recusa o comando inteiro e nenhum
         // quarto entra — nada de Casa Fechada pela metade.
         const label = targetRooms.length > 1 ? roomId : null;
+        let seen; // primeira vista dos eventos recusados (carrega só se precisar)
         for (const ev of evts) {
           const missing = [];
           for (const targetRoom of targetRooms) {
@@ -980,6 +981,34 @@ async function runSync({ fetcher = fetchUrl } = {}) {
           const rooms = missing.map(m => m.room_id).join(",");
           const { error: insErr } = await supabase.from("reservations").insert(missing);
           if (insErr) {
+            // Eco (PMS-010): a plataforma devolveu como fechadas datas que a PMS
+            // mandou fechar na última leitura do link do anúncio. Já estão
+            // ocupadas aqui, então não é reserva nova nem falha; fica registrado
+            // à parte para conferência. Qualquer dúvida (nunca leu, registro
+            // ilegível, datas fora do que foi enviado) continua como conflito.
+            if (isOverlapError(insErr) && feedExport.CHANNELS.includes(source)) {
+              if (seen === undefined) seen = await loadFirstSeen(source, roomId);
+              let firstSeen = null;
+              if (seen) {
+                const k = seenKey(ev);
+                if (seen.map[k]) firstSeen = seen.map[k];
+                else {
+                  // Grava já; se não gravar, trata como conflito (sem data confiável).
+                  const keep = new Set(evts.map(seenKey));
+                  const map = Object.fromEntries(Object.entries(seen.map).filter(([x]) => keep.has(x)));
+                  map[k] = new Date().toISOString();
+                  const { error: seenErr } = await supabase.from("settings").upsert({ key: firstSeenKey(source, roomId), value: map });
+                  if (seenErr) console.error(`[runSync] falha ao registrar evento visto ${source}/${roomId}: ${seenErr.code || seenErr.message}`);
+                  else { seen.map = map; firstSeen = map[k]; }
+                }
+              }
+              const sent = firstSeen ? await sentNightsTo(source, roomId) : null;
+              if (sent && feedExport.isEcho(sent, ev.checkIn, ev.checkOut, firstSeen)) {
+                feed.echoes.push({ room: label || missing[0].room_id, checkIn: ev.checkIn, checkOut: ev.checkOut });
+                log.push(`   ℹ️ Já fechado pela PMS (eco): ${label || "Qto " + rooms} (${ev.checkIn} → ${ev.checkOut})`);
+                continue;
+              }
+            }
             // Antes o erro era ignorado em silêncio (achado I3).
             failed++;
             // Recusa do banco por sobreposição: a plataforma vendeu datas já ocupadas
@@ -1747,6 +1776,28 @@ app.get("/calendar/:token/:roomId.ics", trackFeed("token"), async (req, res) => 
 
 // PMS-010 passo 2: calendário por canal, para o Airbnb e o Booking importarem.
 // /calendar/<token>/<airbnb|booking>/<quarto|CF|11+12>.ics — regras em lib/feed-export.js.
+// Uma chave por anúncio: leituras simultâneas de anúncios diferentes não se sobrescrevem.
+const exportRecordKey = (channel, product) => `feed_export:${channel}:${product}`;
+
+// Noites que a plataforma recebeu fechadas (e desde quando), ou null se ela
+// nunca leu o link do anúncio ou se não deu para ler o registro.
+async function sentNightsTo(channel, product) {
+  const { data, error } = await supabase.from("settings").select("value").eq("key", exportRecordKey(channel, product)).maybeSingle();
+  if (error || !data || !data.value || !data.value.nights || typeof data.value.nights !== "object") return null;
+  return data.value.nights;
+}
+
+// Primeira vez que a PMS viu cada evento recusado por sobreposição, por anúncio.
+// Fica no banco (não na memória) para sobreviver a reinício do servidor:
+// se sumisse, uma reserva real antiga pareceria "nova" e poderia virar eco.
+const firstSeenKey = (source, product) => `ical_first_seen:${source}:${product}`;
+async function loadFirstSeen(source, product) {
+  const { data, error } = await supabase.from("settings").select("value").eq("key", firstSeenKey(source, product)).maybeSingle();
+  if (error) return null;
+  return { map: { ...((data && data.value) || {}) } };
+}
+const seenKey = (ev) => `${ev.uid}|${ev.checkIn}|${ev.checkOut}`;
+
 app.get("/calendar/:token/:channel/:roomId.ics", trackFeed(req => `canal-${req.params.channel}`), async (req, res) => {
   const CALENDAR_TOKEN = process.env.CALENDAR_TOKEN || "";
   if (!CALENDAR_TOKEN || !safeEqual(req.params.token, CALENDAR_TOKEN)) return res.status(403).send("Acesso negado");
@@ -1763,6 +1814,23 @@ app.get("/calendar/:token/:channel/:roomId.ics", trackFeed(req => `canal-${req.p
     return res.status(503).send("Calendário temporariamente indisponível");
   }
   const rows = feedExport.feedRows(data, { channel, product: roomId });
+  // Quando a própria plataforma lê o link, guarda as datas que ela recebeu
+  // fechadas. É o que permite reconhecer o "eco" (a plataforma devolvendo esse
+  // fechamento no calendário dela) sem confundir com overbooking. Só datas.
+  if (feedAccess.agentFamily(req.headers["user-agent"]) === feedExport.CHANNEL_AGENT[channel]) {
+    const key = exportRecordKey(channel, roomId);
+    const { data: prev, error: prevErr } = await supabase.from("settings").select("value").eq("key", key).maybeSingle();
+    if (prevErr) {
+      // Sem o registro anterior não dá para manter o "desde" de cada noite: não grava
+      // (gravar com "desde = agora" é seguro, mas apagaria o histórico por engano).
+      console.error(`[calendar] falha ao ler envio anterior ${channel}/${roomId}: ${prevErr.code || prevErr.message}`);
+    } else {
+      const now = new Date().toISOString();
+      const nights = feedExport.mergeSentNights(prev && prev.value && prev.value.nights, feedExport.exportedPeriods(rows), now);
+      const { error: recErr } = await supabase.from("settings").upsert({ key, value: { at: now, nights } });
+      if (recErr) console.error(`[calendar] falha ao registrar envio ${channel}/${roomId}: ${recErr.code || recErr.message}`);
+    }
+  }
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-store");
   res.send(feedExport.buildCalendar(rows, { channel, product: roomId }));
