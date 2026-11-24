@@ -30,3 +30,28 @@ jobs:
       - run: npm test
       # Falha se houver dependência com vulnerabilidade alta ou crítica (só as de produção).
       - run: npm audit --omit=dev --audit-level=high
+
+  # PMS-016: o banco é reproduzível a partir do repositório. Num Postgres 17
+  # descartável (mesma versão do Supabase em produção): baseline → migrations →
+  # verificações → rollback de todas → reaplicação. Nenhum segredo, nenhum dado real.
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ensaio-descartavel
+          POSTGRES_DB: ensaio
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/verificar-migrations.sh
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: ensaio-descartavel
+          PGDATABASE: ensaio
