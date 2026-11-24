@@ -10,6 +10,7 @@ const { createClient } = require("@supabase/supabase-js");
 const availability = require("./lib/availability");
 const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
+const messages = require("./lib/messages");
 const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
@@ -784,6 +785,24 @@ app.delete("/reservations/:id", authMiddleware, adminOnly, async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   if (before) await audit(req, "reserva.apagar", "reservation", req.params.id, req.params.id, auditLib.snapshot(before));
   res.json({ ok: true });
+});
+
+// ── Modelos de mensagem de WhatsApp (PMS-021) ───────────────────────────────
+// O servidor só guarda os modelos; quem preenche e abre o WhatsApp é a tela,
+// depois que a pessoa revisa o texto. Nada é enviado automaticamente.
+app.get("/message-templates", authMiddleware, async (req, res) => {
+  const { data, error } = await supabase.from("settings").select("value").eq("key", messages.SETTINGS_KEY).maybeSingle();
+  if (error) return res.status(500).json({ error: "Não foi possível ler os modelos de mensagem" });
+  const stored = data && Array.isArray(data.value) ? data.value : null;
+  res.json({ templates: messages.templatesForRole(stored, req.user.role), custom: !!stored });
+});
+
+app.put("/message-templates", authMiddleware, adminOnly, async (req, res) => {
+  const r = messages.sanitizeTemplates(req.body && req.body.templates);
+  if (r.error) return res.status(400).json({ error: r.error });
+  const { error } = await supabase.from("settings").upsert({ key: messages.SETTINGS_KEY, value: r.templates });
+  if (error) return res.status(500).json({ error: "Não foi possível salvar os modelos" });
+  res.json({ templates: r.templates });
 });
 
 // ── URLs iCal ─────────────────────────────────────────────────────────────────
