@@ -1585,7 +1585,7 @@ app.get("/calendar/:token/:roomId.ics", trackFeed("token"), async (req, res) => 
 // Lista todas as URLs de calendário (admin)
 app.get("/calendar-urls", authMiddleware, adminOnly, async (req, res) => {
   const token = process.env.CALENDAR_TOKEN || "";
-  if (!token) return res.status(503).json({ error: "CALENDAR_TOKEN não definido. Adicione nas variáveis de ambiente do Render." });
+  if (!token) return res.status(503).json({ code: "CALENDAR_TOKEN_MISSING", error: "CALENDAR_TOKEN não definido. Adicione nas variáveis de ambiente do Render." });
   const base  = process.env.ALLOWED_ORIGIN || "https://pousada-pms-209a.onrender.com";
   const rooms = ["10","11","12","20","21","22","23","24","25","11+12","CF"];
   const urls  = Object.fromEntries(rooms.map(r => [r, `${base}/calendar/${token}/${r}.ics`]));

@@ -879,7 +879,8 @@ function render() {
 }
 
 function showView(v) {
-  if (v !== "sync") window._calUrlsLoaded = false;
+  // Sai da tela de sync: na próxima visita as URLs são buscadas de novo.
+  if (v !== "sync" && calUrlsState !== "loading") calUrlsState = "idle";
   currentView = v;
   render();
   if (v === "relatorios" && authRole === "admin") loadReport(reportMonth);
@@ -2047,13 +2048,40 @@ async function deletePreReserva(id) {
 }
 
 
+// ─── URLs de exportação (PMS-012: nunca ficar em "Carregando…" para sempre) ───
+// Estado explícito: idle → loading → ok | error. Erro sempre vira mensagem na tela.
+let calUrlsState = "idle";
+let calUrls = null;
+let calUrlsError = null;
+async function loadCalUrls() {
+  if (calUrlsState === "loading") return;
+  calUrlsState = "loading";
+  const r = await api("GET", "/calendar-urls");
+  if (r && r.urls && typeof r.urls === "object") {
+    calUrls = r.urls; calUrlsError = null; calUrlsState = "ok";
+  } else {
+    calUrls = null; calUrlsState = "error";
+    if (r && r.code === "CALENDAR_TOKEN_MISSING") {
+      calUrlsError = "As URLs novas (com token) ainda não estão ativas: falta a variável CALENDAR_TOKEN no Render. " +
+        "As URLs que já estão cadastradas no Booking/Airbnb continuam funcionando. " +
+        "Não troque nada nas plataformas agora: a troca faz parte do plano de transição (PMS-010).";
+    } else {
+      calUrlsError = apiErrorMessage(r) || "Não foi possível carregar as URLs de exportação.";
+    }
+  }
+  const el = document.getElementById("cal-urls-section");
+  if (el) el.innerHTML = renderCalUrls();
+}
+
 function renderCalUrls() {
-  if (window._calError) {
-    return `<div style="color:#f59e0b;font-size:12px;padding:8px 0">
-      ⚠️ ${esc(window._calError)}
+  if (calUrlsState === "idle") loadCalUrls();
+  if (calUrlsState === "error") {
+    return `<div style="color:#f59e0b;font-size:12px;padding:8px 0;line-height:1.6">
+      ⚠️ ${calUrlsError}
+      <div style="margin-top:8px"><button class="btn" onclick="calUrlsState='idle';document.getElementById('cal-urls-section').innerHTML=renderCalUrls()">Tentar de novo</button></div>
     </div>`;
   }
-  if (!window._calUrls) {
+  if (calUrlsState !== "ok" || !calUrls) {
     return `<div style="color:var(--mu);font-size:12px">Carregando URLs…</div>`;
   }
   const rooms = [
@@ -2069,7 +2097,7 @@ function renderCalUrls() {
 
   let s = `<div style="display:flex;flex-direction:column;gap:6px">`;
   for (const [id] of rooms) {
-    const url = window._calUrls[id] || "";
+    const url = calUrls[id] || "";
     if (!url) continue;
     s += `<div style="display:flex;align-items:center;gap:8px">
       <div style="width:58px;font-size:11px;font-weight:700;color:var(--bl);flex-shrink:0">
