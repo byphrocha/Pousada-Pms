@@ -942,13 +942,18 @@ async function runSync({ fetcher = fetchUrl } = {}) {
         // passado (achado I1). Removido: estadia terminada não é cancelamento.
 
         // ── ADIÇÃO: insere reservas novas que ainda não estão no banco ──────
+        // CF e 11+12 (regra 5): todos os quartos que faltam vão num único INSERT.
+        // Se um quarto estiver ocupado, o banco recusa o comando inteiro e nenhum
+        // quarto entra — nada de Casa Fechada pela metade.
+        const label = targetRooms.length > 1 ? roomId : null;
         for (const ev of evts) {
+          const missing = [];
           for (const targetRoom of targetRooms) {
             const roomUid = icalReconcile.rowKey(source, targetRoom, ev.uid);
             const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).maybeSingle();
             if (exists) continue;
             const importGroup = groupsOn ? groups.groupIdForImport(source, roomId, ev.uid) : null;
-            const { error: insErr } = await supabase.from("reservations").insert({
+            missing.push({
               ...(importGroup ? { group_id: importGroup } : {}),
               id: genId(), room_id: targetRoom, external_uid: roomUid, status: "confirmed",
               guest_name:  ev.summary || `${source} reserva`,
@@ -960,21 +965,24 @@ async function runSync({ fetcher = fetchUrl } = {}) {
                    : "Importado via iCal",
               created_at: new Date().toISOString(),
             });
-            if (insErr) {
-              // Antes o erro era ignorado em silêncio (achado I3).
-              failed++;
-              // Recusa do banco por sobreposição: a plataforma vendeu datas já ocupadas
-              // (overbooking real). A reserva NÃO entra no PMS, então precisa aparecer
-              // no aviso da tela com quarto e datas para alguém resolver.
-              if (isOverlapError(insErr)) feed.conflicts.push({ room: targetRoom, checkIn: ev.checkIn, checkOut: ev.checkOut });
-              console.error(`[runSync] Falha ao importar ${source}/${roomId} quarto=${targetRoom} ` +
-                            `periodo=${ev.checkIn}..${ev.checkOut}: ${insErr.code || insErr.message || "erro"}`);
-              log.push(`   ✗ Não importado: Qto ${targetRoom} (${ev.checkIn} → ${ev.checkOut})`);
-              continue;
-            }
-            log.push(`   ✓ Novo: Qto ${targetRoom} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
-            added++;
           }
+          if (!missing.length) continue;
+          const rooms = missing.map(m => m.room_id).join(",");
+          const { error: insErr } = await supabase.from("reservations").insert(missing);
+          if (insErr) {
+            // Antes o erro era ignorado em silêncio (achado I3).
+            failed++;
+            // Recusa do banco por sobreposição: a plataforma vendeu datas já ocupadas
+            // (overbooking real). A reserva NÃO entra no PMS, então precisa aparecer
+            // no aviso da tela com quarto e datas para alguém resolver.
+            if (isOverlapError(insErr)) feed.conflicts.push({ room: label || missing[0].room_id, checkIn: ev.checkIn, checkOut: ev.checkOut });
+            console.error(`[runSync] Falha ao importar ${source}/${roomId} quartos=${rooms} ` +
+                          `periodo=${ev.checkIn}..${ev.checkOut}: ${insErr.code || insErr.message || "erro"}`);
+            log.push(`   ✗ Não importado: ${label ? label + " (" + rooms + ")" : "Qto " + rooms} (${ev.checkIn} → ${ev.checkOut})`);
+            continue;
+          }
+          for (const m of missing) log.push(`   ✓ Novo: Qto ${m.room_id} — ${ev.summary || "Reserva"} (${ev.checkIn} → ${ev.checkOut})`);
+          added += missing.length;
         }
 
         // ── RECONCILIAÇÃO: datas alteradas e reservas que sumiram do feed ───
@@ -998,11 +1006,29 @@ async function runSync({ fetcher = fetchUrl } = {}) {
               (plan.updates.length ? ` | datas: ${plan.updates.map(u => `${u.id}@${u.room_id} ${u.from.join("..")}->${u.to.join("..")}`).join(", ")}` : "") +
               (plan.cancels.length ? ` | cancelar: ${plan.cancels.map(c => `${c.id}@${c.room_id}`).join(", ")}` : ""));
             if (mode === "apply") {
+              // Linhas do mesmo evento (CF / 11+12) mudam de data num único UPDATE:
+              // ou o grupo inteiro muda, ou nenhum quarto muda (regra 5).
+              const uidOf = (u) => { const r = rows.find(x => x.id === u.id); const k = r && r.external_uid;
+                return k ? String(k).slice(`${source}-${u.room_id}-`.length) : u.id; };
+              const batches = new Map();
               for (const u of plan.updates) {
+                const key = `${uidOf(u)}|${u.to[0]}|${u.to[1]}`;
+                if (!batches.has(key)) batches.set(key, []);
+                batches.get(key).push(u);
+              }
+              for (const list of batches.values()) {
+                const to = list[0].to;
                 const { error } = await supabase.from("reservations")
-                  .update({ check_in: u.to[0], check_out: u.to[1] }).eq("id", u.id).eq("status", "confirmed");
-                if (error) { failed++; console.error(`[ical-reconcile] falha ao atualizar ${u.id}: ${error.code || error.message}`); }
-                else { updated++; log.push(`   ↻ Datas alteradas: Qto ${u.room_id} ${u.from.join(" → ")} ⇒ ${u.to.join(" → ")}`); }
+                  .update({ check_in: to[0], check_out: to[1] }).in("id", list.map(u => u.id)).eq("status", "confirmed");
+                if (error) {
+                  failed++;
+                  if (isOverlapError(error))
+                    feed.conflicts.push({ room: label && list.length > 1 ? label : list[0].room_id, checkIn: to[0], checkOut: to[1] });
+                  console.error(`[ical-reconcile] falha ao atualizar ${list.map(u => u.id).join(",")}: ${error.code || error.message}`);
+                } else {
+                  updated += list.length;
+                  for (const u of list) log.push(`   ↻ Datas alteradas: Qto ${u.room_id} ${u.from.join(" → ")} ⇒ ${u.to.join(" → ")}`);
+                }
               }
               for (const c of plan.cancels) {
                 const { error } = await supabase.from("reservations")
