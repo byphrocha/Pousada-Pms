@@ -12,6 +12,7 @@ const icalReconcile = require("./lib/ical-reconcile");
 const syncStatus = require("./lib/sync-status");
 const groups = require("./lib/groups");
 const reservationInput = require("./lib/reservation-input");
+const feedExport = require("./lib/feed-export");
 const session = require("./lib/session");
 const payments = require("./lib/payments");
 const auditLib = require("./lib/audit");
@@ -1639,9 +1640,10 @@ async function flushFeedAccess(force = false) {
     feedPending = feedAccess.mergeInventory(pending, feedPending); // tenta de novo depois
   }
 }
-function trackFeed(variant) {
+function trackFeed(variantOf) {
   return (req, res, next) => {
     res.on("finish", () => {
+      const variant = typeof variantOf === "function" ? variantOf(req) : variantOf;
       const room = FEED_ROOMS.has(req.params.roomId) ? req.params.roomId : "inválido";
       const agent = feedAccess.agentFamily(req.headers["user-agent"]);
       feedAccess.addAccess(feedPending, { variant, room, agent, status: res.statusCode, at: new Date().toISOString() });
@@ -1743,14 +1745,48 @@ app.get("/calendar/:token/:roomId.ics", trackFeed("token"), async (req, res) => 
   }
 });
 
-// Lista todas as URLs de calendário (admin)
+// PMS-010 passo 2: calendário por canal, para o Airbnb e o Booking importarem.
+// /calendar/<token>/<airbnb|booking>/<quarto|CF|11+12>.ics — regras em lib/feed-export.js.
+app.get("/calendar/:token/:channel/:roomId.ics", trackFeed(req => `canal-${req.params.channel}`), async (req, res) => {
+  const CALENDAR_TOKEN = process.env.CALENDAR_TOKEN || "";
+  if (!CALENDAR_TOKEN || !safeEqual(req.params.token, CALENDAR_TOKEN)) return res.status(403).send("Acesso negado");
+  const { channel, roomId } = req.params;
+  const rooms = feedExport.roomsOf(roomId);
+  if (!feedExport.CHANNELS.includes(channel) || !rooms) return res.status(404).send("Calendário não encontrado");
+  const withGroup = await groupsEnabled();
+  const { data, error } = await selectAllPages(() => supabase.from("reservations")
+    .select("id, room_id, guest_name, check_in, check_out, status, source, external_uid, notes" + (withGroup ? ", group_id" : ""))
+    .in("room_id", rooms).gte("check_out", feedCutoff()).order("check_in").order("id"));
+  if (error) {
+    // Nunca servir calendário vazio por erro: a plataforma reabriria todas as datas.
+    console.error(`[calendar] falha ao gerar feed ${channel}/${roomId}: ${error.code || error.message}`);
+    return res.status(503).send("Calendário temporariamente indisponível");
+  }
+  const rows = feedExport.feedRows(data, { channel, product: roomId });
+  res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-store");
+  res.send(feedExport.buildCalendar(rows, { channel, product: roomId }));
+});
+
+// Lista as URLs de calendário (admin). "channels": um link por anúncio cadastrado
+// em cada plataforma (é o que se cola no Airbnb/Booking). As URLs de origem
+// (ical_urls) nunca são devolvidas.
 app.get("/calendar-urls", authMiddleware, adminOnly, async (req, res) => {
   const token = process.env.CALENDAR_TOKEN || "";
   if (!token) return res.status(503).json({ code: "CALENDAR_TOKEN_MISSING", error: "CALENDAR_TOKEN não definido. Adicione nas variáveis de ambiente do Render." });
   const base  = process.env.ALLOWED_ORIGIN || "https://pousada-pms-209a.onrender.com";
   const rooms = ["10","11","12","20","21","22","23","24","25","11+12","CF"];
   const urls  = Object.fromEntries(rooms.map(r => [r, `${base}/calendar/${token}/${r}.ics`]));
-  res.json({ urls });
+  const { data, error } = await supabase.from("settings").select("value").eq("key", "ical_urls").maybeSingle();
+  if (error) return res.status(500).json({ error: "Não foi possível ler os anúncios cadastrados" });
+  const conf = (data && data.value) || {};
+  const channels = {};
+  for (const ch of feedExport.CHANNELS) {
+    const listed = Object.entries(conf[ch] || {}).filter(([room, url]) => url && feedExport.roomsOf(room)).map(([room]) => room);
+    const order = rooms.filter(r => listed.includes(r));
+    channels[ch] = Object.fromEntries(order.map(r => [r, `${base}/calendar/${token}/${ch}/${r}.ics`]));
+  }
+  res.json({ urls, channels });
 });
 
 

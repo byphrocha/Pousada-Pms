@@ -84,6 +84,7 @@ const ROTAS = [
   ["POST",   "/login",                      "publica"],
   ["GET",    "/healthz",                    "publica"],
   ["GET",    "/calendar/TOKEN/20.ics",      "publica"],
+  ["GET",    "/calendar/TOKEN/booking/20.ics", "publica"],
   ["GET",    "/calendar/20.ics",            "publica"],
   ["GET",    "*",                           "publica"],
 ];
@@ -94,6 +95,7 @@ const DECLARADA = (p) => p
   .replace("/reservations/r1/history", "/reservations/:id/history")
   .replace(/\?.*$/, "")
   .replace("/room-states/20/cleaned", "/room-states/:roomId/:kind")
+  .replace("/calendar/TOKEN/booking/20.ics", "/calendar/:token/:channel/:roomId.ics")
   .replace("/calendar/TOKEN/20.ics", "/calendar/:token/:roomId.ics")
   .replace("/calendar/20.ics", "/calendar/:roomId.ics");
 
