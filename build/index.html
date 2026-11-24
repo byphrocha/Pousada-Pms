@@ -3239,6 +3239,10 @@ async function submitForm(id) {
   };
   // Funcionário não vê nem envia valores (o servidor também ignora).
   if (authRole !== "admin") { delete form.amount; delete form.payment; }
+  // Edição não mexe no status: antes o formulário mandava sempre "confirmed" e
+  // salvar uma correção reativava reserva cancelada ou confirmava pendente.
+  // Status muda só pelos botões próprios (ex.: "Cancelar Reserva").
+  if (id && reservations.some(r => r.id === id)) delete form.status;
   if (!form.guestName||!form.checkIn||!form.checkOut||form.checkOut<=form.checkIn) {
     alert("Preencha nome, check-in e check-out corretamente."); return;
   }
