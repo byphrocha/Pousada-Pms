@@ -78,6 +78,7 @@ input,select,textarea{font-family:inherit}
 .rc-guest{font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rc-empty{color:var(--dm);font-weight:500}
 .nw{white-space:nowrap}
+.group-note{font-size:13px;color:#f59e0b;background:#f59e0b14;border:1px solid #f59e0b55;border-radius:10px;padding:10px 12px;margin-bottom:14px;line-height:1.5}
 .rc-out{font-size:11px;color:var(--mu);margin-top:-4px}
 .clean-btn{margin-top:auto;font-size:12px;padding:7px 8px;border-radius:9px;border:1px solid color-mix(in srgb,var(--sc) 50%,transparent);background:color-mix(in srgb,var(--sc) 14%,transparent);color:var(--sc);cursor:pointer;font-family:inherit;font-weight:700;width:100%}
 .clean-btn:hover{background:color-mix(in srgb,var(--sc) 24%,transparent)}
@@ -694,6 +695,7 @@ function normalizeRes(r) {
     notes:       r.notes      || "",
     status:      r.status     || "confirmed",
     externalUid: r.external_uid || r.externalUid || null,
+    groupId:     r.group_id || r.groupId || null,
     createdAt:   r.created_at   || r.createdAt   || new Date().toISOString(),
     amount:      r.amount   || 0,
     payment:     r.payment  || "pix",
@@ -811,9 +813,25 @@ function localConflict(roomIds, checkIn, checkOut, ignoreId) {
   );
 }
 
+// PMS-006: rótulo do grupo da reserva (Casa Fechada / 11+12), ou null.
+function groupLabelOf(r) {
+  if (!r) return null;
+  const tag = r.groupId || "";
+  if (tag.startsWith("cf:") || /\[Casa toda:/.test(r.notes || "")) return "Casa Fechada (9 quartos)";
+  if (tag.startsWith("suite:") || /\[Suíte grupo:/.test(r.notes || "")) return "suíte 11+12 (2 quartos)";
+  return null;
+}
+
 async function cancelReservation(id) {
-  if (!confirm("Cancelar esta reserva? Esta ação não pode ser desfeita.")) return;
-  await api("PUT",`/reservations/${id}`, {status:"cancelled"});
+  const r = reservations.find(x => x.id === id);
+  // Com a coluna de grupo, o servidor cancela o grupo inteiro de uma vez.
+  const grp = r && r.groupId ? groupLabelOf(r) : null;
+  const msg = grp ? `Cancelar a ${grp} inteira? Todos os quartos do grupo serão cancelados juntos. Esta ação não pode ser desfeita.`
+                  : "Cancelar esta reserva? Esta ação não pode ser desfeita.";
+  if (!confirm(msg)) return;
+  const res = await api("PUT",`/reservations/${id}`, {status:"cancelled"});
+  const err = apiErrorMessage(res);
+  if (err) { alert("Não foi possível cancelar: " + err); await loadAll(); return; }
   await loadAll();
   closeModal();
 }
@@ -2807,7 +2825,10 @@ function openEditModal(id) {
     `Editar Reserva <button onclick="closeModal()">×</button>`;
   const withPayments = paymentsEnabled && authRole === "admin" && r.source === "direto";
   const withHistory = authRole === "admin";
-  document.getElementById("modal-body").innerHTML = reservationForm(r, true) +
+  const grp = r.groupId ? groupLabelOf(r) : null;
+  document.getElementById("modal-body").innerHTML =
+    (grp ? `<div class="group-note">🔗 Esta reserva faz parte da ${esc(grp)}. Datas, nome, telefone, canal e status mudam em todos os quartos juntos.</div>` : "") +
+    reservationForm(r, true) +
     (withPayments ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "") +
     (withHistory ? `<div id="hist-box" style="margin-top:14px;font-size:12px;color:var(--mu)"></div>` : "");
   document.getElementById("modal").style.display="flex";

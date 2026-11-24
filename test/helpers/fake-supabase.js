@@ -5,14 +5,16 @@
 // Sem "users" no estado inicial, entram os usuários fictícios de helpers/auth.js
 // (o servidor valida a sessão no banco). failSelect simula falha de leitura nas
 // tabelas de dados, não na de usuários (senão nenhum pedido autenticado passaria).
-function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, maxRows = 1000 } = {}) {
+// missingColumns: { tabela: ["coluna"] } simula banco ANTES de uma migration que
+// cria a coluna (o select/filtro/gravação com ela falha como no Postgres).
+function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, maxRows = 1000, missingColumns = {} } = {}) {
   const tables = {};
   if (!("users" in initial)) initial = { ...initial, users: require("./auth").TEST_USERS };
   for (const [t, rows] of Object.entries(initial)) tables[t] = rows.map(r => ({ ...r }));
   const log = []; // operações executadas, para os testes inspecionarem
 
   function query(table) {
-    const state = { table, op: "select", filters: [], payload: null, single: null, columns: "*" };
+    const state = { table, op: "select", filters: [], payload: null, single: null, columns: "*", usedCols: [] };
     const rows = () => (tables[table] ||= []);
     const match = (r) => state.filters.every(f => f(r));
 
@@ -22,7 +24,7 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
       update(p) { state.op = "update"; state.payload = p; return api; },
       upsert(p) { state.op = "upsert"; state.payload = p; return api; },
       delete()  { state.op = "delete"; return api; },
-      eq(c, v)  { state.filters.push(r => String(r[c]) === String(v)); return api; },
+      eq(c, v)  { state.usedCols.push(c); state.filters.push(r => String(r[c]) === String(v)); return api; },
       neq(c, v) { state.filters.push(r => String(r[c]) !== String(v)); return api; },
       in(c, vs) { state.filters.push(r => vs.map(String).includes(String(r[c]))); return api; },
       lt(c, v)  { state.filters.push(r => String(r[c]) < String(v)); return api; },
@@ -48,7 +50,15 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
 
     async function exec() {
       if (delayMs) await new Promise(r => setTimeout(r, delayMs));
-      log.push({ table, op: state.op, payload: state.payload, columns: state.columns });
+      log.push({ table, op: state.op, payload: state.payload, columns: state.columns, filters: state.usedCols.slice() });
+      const gone = missingColumns[table] || [];
+      if (gone.length) {
+        const cols = String(state.columns).split(",").map(x => x.trim());
+        const payloadCols = [].concat(state.payload || []).flatMap(p => Object.keys(p || {}));
+        const hit = gone.find(c => cols.includes(c) || state.usedCols.includes(c) || payloadCols.includes(c));
+        if (hit) return { data: null, error: { code: state.op === "select" ? "42703" : "PGRST204",
+          message: `column ${table}.${hit} does not exist` } };
+      }
       let data;
       if (state.op === "select") {
         if (failSelect && table !== "users") return { data: null, error: { message: "falha simulada" } };
