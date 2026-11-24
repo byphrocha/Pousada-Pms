@@ -12,7 +12,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Pousada">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,700;1,300&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Figtree:wght@400;500;600;700;800&family=Fraunces:ital,wght@0,300;0,700;1,300&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -25,43 +25,64 @@
   --am:#f59e0b;--amd:#2b1e0a;
   --lp:#a855f7;--lpd:#1e0f2b;
   --bk:#0066cc;--ab:#ff5a5f;--di:#8b5cf6;
+  --font:'Figtree',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'DM Mono',ui-monospace,monospace;
 }
-body{background:var(--bg0);color:var(--tx);font-family:'DM Mono',monospace;min-height:100vh;display:flex}
-button{font-family:'DM Mono',monospace;cursor:pointer}
-input,select,textarea{font-family:'DM Mono',monospace}
+body{background:var(--bg0);color:var(--tx);font-family:var(--font);font-size:14px;min-height:100vh;display:flex;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer}
+input,select,textarea{font-family:inherit}
+:focus-visible{outline:2px solid var(--bl);outline-offset:2px}
 
 /* Layout */
-#sidebar{width:64px;background:var(--bg1);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:4px;flex-shrink:0}
-#sidebar .logo{font-size:24px;margin-bottom:16px}
-.nav-btn{width:48px;height:48px;border-radius:10px;border:none;background:transparent;font-size:20px;color:var(--tx);cursor:pointer;display:flex;align-items:center;justify-content:center;border-left:3px solid transparent;transition:all .15s}
-.nav-btn.active{background:var(--bg3);border-left-color:var(--bl)}
+#sidebar{width:96px;background:var(--bg1);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:stretch;padding:14px 8px;gap:2px;flex-shrink:0;overflow-y:auto}
+#sidebar .logo{font-size:24px;margin-bottom:10px;text-align:center}
+.nav-group{font-size:11px;font-weight:600;color:var(--mu);padding:12px 4px 4px;text-align:center;border-top:1px solid var(--bd);margin-top:6px}
+.logo + .nav-group{border-top:none;margin-top:0;padding-top:2px}
+.nav-btn{position:relative;width:100%;min-height:54px;border-radius:12px;border:none;background:transparent;color:var(--dm);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px;transition:background .15s,color .15s}
+.nav-btn .ico{font-size:20px;line-height:1}
+.nav-btn .lbl{font-size:11px;font-weight:600;line-height:1.15;text-align:center}
+.nav-btn:hover{background:var(--bg2);color:var(--tx)}
+.nav-btn.active{background:#1e3a5f;color:#fff;box-shadow:inset 0 0 0 1px #3b82f666}
+.nav-btn .dot{display:none;position:absolute;top:6px;right:14px;width:9px;height:9px;background:var(--rd);border-radius:50%;box-shadow:0 0 0 2px var(--bg1)}
+.nav-btn.has-alert .dot{display:block}
+.nav-more{display:none}
+.more-group{font-size:12px;font-weight:600;color:var(--mu);margin:14px 0 8px}
+.more-group:first-child{margin-top:0}
+.more-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.more-item{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;border:1px solid var(--bd);background:var(--bg2);color:var(--tx);font-size:14px;font-weight:600;text-align:left;position:relative}
+.more-item .ico{font-size:20px}
+.more-item.active{border-color:var(--bl);background:#1e3a5f}
+.more-item.has-alert::after{content:"";position:absolute;top:8px;right:10px;width:9px;height:9px;border-radius:50%;background:var(--rd)}
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 #topbar{background:var(--bg1);border-bottom:1px solid var(--bd);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-#topbar h1{font-family:'Fraunces',serif;font-size:18px;font-weight:700;color:var(--tx)}
-#topbar .sub{font-size:10px;color:var(--mu);margin-top:2px;letter-spacing:.04em}
+#topbar h1{font-family:'Fraunces',serif;font-size:21px;font-weight:700;color:var(--tx)}
+#topbar .sub{font-size:12px;color:var(--mu);margin-top:2px}
 #content{flex:1;overflow-y:auto;padding:24px}
 
 /* Cards */
 .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
-.kpi{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;text-align:center}
-.kpi .val{font-size:28px;font-weight:700;font-family:'Fraunces',serif;line-height:1}
-.kpi .lbl{font-size:9px;color:var(--mu);margin-top:4px;letter-spacing:.1em}
+.kpi{background:var(--bg2);border:1px solid var(--bd);border-radius:14px;padding:14px 16px;text-align:left}
+.kpi .val{font-size:30px;font-weight:700;font-family:'Fraunces',serif;line-height:1;font-variant-numeric:lining-nums;color:var(--tx)}
+.kpi .lbl{font-size:12px;color:var(--dm);margin-top:6px;font-weight:600;display:flex;align-items:center;gap:6px}
+.kpi .lbl .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
 /* Room grid */
-.room-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:12px}
-.room-card{border-radius:12px;padding:12px 8px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;transition:transform .18s,box-shadow .18s;user-select:none}
-.room-card:hover{transform:translateY(-3px)}
-.room-dot{position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%}
-.room-num{font-size:20px;font-weight:700;line-height:1}
-.room-icon{font-size:24px}
-.room-type{font-size:9px;text-align:center;line-height:1.3;font-weight:600;max-width:80px}
-.room-climate{font-size:9px;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:99px}
-.clean-btn{margin-top:4px;font-size:9px;padding:3px 8px;border-radius:6px;border:1px solid #a855f7;background:#1e0f2b;color:#a855f7;cursor:pointer;font-family:'DM Mono',monospace;font-weight:700;transition:background .15s}
-.clean-btn:hover{background:#2d1545}
+.room-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:12px}
+.room-card{--sc:var(--gr);background:var(--bg2);border:1px solid var(--bd);border-top:4px solid var(--sc);border-radius:14px;padding:12px 12px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;position:relative;user-select:none;transition:border-color .15s,background .15s}
+.room-card:hover{background:var(--bg3);border-color:var(--bdh);border-top-color:var(--sc)}
+.rc-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.room-num{font-family:'Fraunces',serif;font-size:26px;font-weight:700;line-height:1;color:var(--tx)}
+.rc-chip{font-size:11px;font-weight:700;color:var(--sc);background:color-mix(in srgb,var(--sc) 16%,transparent);border-radius:99px;padding:3px 8px;white-space:nowrap}
+.room-type{font-size:12px;color:var(--dm)}
+.rc-guest{font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc-empty{color:var(--mu);font-weight:400}
+.rc-out{font-size:11px;color:var(--mu);margin-top:-4px}
+.clean-btn{margin-top:auto;font-size:12px;padding:7px 8px;border-radius:9px;border:1px solid color-mix(in srgb,var(--sc) 50%,transparent);background:color-mix(in srgb,var(--sc) 14%,transparent);color:var(--sc);cursor:pointer;font-family:inherit;font-weight:700;width:100%}
+.clean-btn:hover{background:color-mix(in srgb,var(--sc) 24%,transparent)}
 
 /* Legend */
 .legend{display:flex;gap:18px;margin-bottom:18px;flex-wrap:wrap}
-.legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mu)}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dm);white-space:nowrap}
 .legend-dot{width:8px;height:8px;border-radius:50%}
 
 /* Reservas list */
@@ -71,7 +92,7 @@ input,select,textarea{font-family:'DM Mono',monospace}
 .pill{font-size:10px;padding:2px 9px;border-radius:99px;font-weight:700;letter-spacing:.04em}
 
 /* Date group header */
-.date-group-header{display:flex;align-items:center;gap:12px;margin:20px 0 10px;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--mu);text-transform:uppercase}
+.date-group-header{display:flex;align-items:center;gap:12px;margin:20px 0 10px;font-size:12px;font-weight:700;color:var(--dm)}
 .date-group-header:first-child{margin-top:0}
 .date-group-line{flex:1;height:1px;background:var(--bd)}
 .date-group-badge{background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:3px 10px;white-space:nowrap;font-size:10px}
@@ -84,14 +105,14 @@ input,select,textarea{font-family:'DM Mono',monospace}
 
 /* Form */
 .field{margin-bottom:12px}
-.field label{display:block;font-size:10px;color:var(--mu);margin-bottom:4px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-.field input,.field select,.field textarea{width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:9px 12px;font-size:13px;outline:none;font-family:'DM Mono',monospace}
+.field label{display:block;font-size:12px;color:var(--dm);margin-bottom:5px;font-weight:600}
+.field input,.field select,.field textarea{width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:10px 12px;font-size:14px;outline:none;font-family:inherit}
 .field textarea{height:64px;resize:vertical}
 .row2{display:flex;gap:12px}
 .row2 .field{flex:1}
 
 /* Buttons */
-.btn{border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;border:1px solid var(--bd);background:var(--bg3);color:#fff;font-family:'DM Mono',monospace;cursor:pointer;transition:opacity .15s}
+.btn{border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;border:1px solid var(--bd);background:var(--bg3);color:#fff;font-family:inherit;cursor:pointer;transition:opacity .15s}
 .btn-green{background:#166534;border-color:#166534}
 .btn-blue{background:#1e3a5f;border-color:var(--bl);color:var(--bl)}
 .btn-red{background:#4a1010;border-color:var(--rd)}
@@ -101,37 +122,37 @@ input,select,textarea{font-family:'DM Mono',monospace}
 
 /* Filter bar */
 .filter-bar{display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap}
-.filter-bar input{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:8px 12px;font-size:13px;outline:none;width:220px;font-family:'DM Mono',monospace}
-.tab-btn{padding:8px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--mu);cursor:pointer;font-size:11px;font-weight:700;font-family:'DM Mono',monospace}
+.filter-bar input{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:8px 12px;font-size:13px;outline:none;width:220px;font-family:inherit}
+.tab-btn{padding:8px 14px;border:1px solid var(--bd);border-radius:99px;background:var(--bg2);color:var(--dm);cursor:pointer;font-size:12px;font-weight:600;font-family:inherit}
 .tab-btn.active{background:#1e3a5f;border-color:var(--bl);color:var(--bl)}
 
 /* Date filter */
 .date-filter{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
-.date-filter label{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
-.date-filter input[type=date]{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:7px 10px;font-size:12px;outline:none;font-family:'DM Mono',monospace}
-.date-filter .clear-btn{font-size:11px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--bg2);color:var(--mu);cursor:pointer;font-family:'DM Mono',monospace}
+.date-filter label{font-size:12px;color:var(--dm);font-weight:600}
+.date-filter input[type=date]{background:var(--bg0);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:7px 10px;font-size:12px;outline:none;font-family:inherit}
+.date-filter .clear-btn{font-size:11px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--bg2);color:var(--mu);cursor:pointer;font-family:inherit}
 
 /* Sync */
-.log-box{background:#04060d;border:1px solid var(--bd);border-radius:10px;padding:16px;font-family:'DM Mono',monospace;font-size:11px;color:#4ade80;max-height:200px;overflow-y:auto;line-height:1.8;margin-top:16px}
+.log-box{background:#04060d;border:1px solid var(--bd);border-radius:10px;padding:16px;font-family:inherit;font-size:11px;color:#4ade80;max-height:200px;overflow-y:auto;line-height:1.8;margin-top:16px}
 .sync-info{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:20px;font-size:13px;color:var(--dm);line-height:1.7}
 
 /* Today agenda */
 .agenda{margin-top:28px;border-top:1px solid var(--bd);padding-top:22px}
 .agenda-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.agenda-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;margin-bottom:8px}
+.agenda-lbl{font-size:13px;font-weight:700;margin-bottom:8px}
+.section-title{font-family:'Fraunces',serif;font-size:18px;font-weight:700;color:var(--tx);margin-bottom:12px}
 .agenda-row{border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px}
 .agenda-room{font-weight:800;font-size:15px}
 
 /* Suite */
 .suite-wrapper{display:contents}
 .suite-group{grid-column:span 2;display:flex;flex-direction:column;gap:4px;
-  border:2px dashed #f59e0b55;border-radius:14px;padding:8px;position:relative;background:#2b1e0a22}
-.suite-label{font-size:9px;color:#f59e0b;font-weight:700;letter-spacing:.1em;text-align:center;
-  margin-bottom:2px;text-transform:uppercase}
-.suite-rooms{display:flex;gap:8px}
+  border:1.5px dashed #f59e0b66;border-radius:16px;padding:10px;position:relative;background:#2b1e0a33}
+.suite-label{font-size:12px;color:#f59e0b;font-weight:700;text-align:left;margin:0 2px 4px}
+.suite-rooms{display:flex;gap:10px}
 .suite-rooms .room-card{flex:1}
-.suite-join-btn{font-size:10px;padding:5px 10px;border-radius:7px;border:1px solid #f59e0b;
-  background:#2b1e0a;color:#f59e0b;cursor:pointer;font-family:'DM Mono',monospace;
+.suite-join-btn{font-size:12px;padding:8px 10px;border-radius:7px;border:1px solid #f59e0b;
+  background:#2b1e0a;color:#f59e0b;cursor:pointer;font-family:inherit;
   font-weight:700;text-align:center;margin-top:2px;transition:background .15s;width:100%}
 .suite-join-btn:hover{background:#3d2a0f}
 
@@ -141,17 +162,18 @@ input,select,textarea{font-family:'DM Mono',monospace}
   #sidebar{
     width:100%; height:58px; flex-direction:row;
     border-right:none; border-top:1px solid var(--bd);
-    padding:0 8px; gap:0;
+    padding:0 6px; gap:2px; align-items:center;
     order:2; position:fixed; bottom:0; left:0; right:0; z-index:100;
     justify-content:space-around;
   }
   #sidebar .logo{display:none}
-  .nav-btn{
-    border-left:none; border-top:3px solid transparent;
-    border-radius:8px; flex:1; height:48px;
-    flex-direction:column; font-size:18px; gap:2px;
-  }
-  .nav-btn.active{border-top-color:var(--bl);background:var(--bg3)}
+  #sidebar .nav-group, #sidebar .nav-extra, #user-nav-btn{display:none !important}
+  .nav-btn{flex:1;min-height:0;height:52px;padding:4px 0;border-radius:10px;gap:2px}
+  .nav-btn .ico{font-size:19px}
+  .nav-btn .lbl{font-size:10px}
+  .nav-btn .dot{right:calc(50% - 18px);top:4px}
+  .nav-more{display:flex}
+  .more-grid{grid-template-columns:1fr 1fr}
   #main{order:1; overflow:hidden; padding-bottom:calc(58px + env(safe-area-inset-bottom, 0px))}
   /* Aberto pela tela de início: respeita notch/Dynamic Island e barra do iPhone */
   #sidebar{height:calc(58px + env(safe-area-inset-bottom, 0px)); padding-bottom:env(safe-area-inset-bottom, 0px)}
@@ -162,15 +184,24 @@ input,select,textarea{font-family:'DM Mono',monospace}
   #content{padding:14px}
 
   /* KPIs: 3 por linha */
-  .kpi-grid{grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
-  .kpi .val{font-size:22px}
-  .kpi .lbl{font-size:8px}
+  .kpi-grid{grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+  .kpi{padding:9px 6px;text-align:center;border-radius:12px}
+  .kpi .val{font-size:21px}
+  .kpi .lbl{font-size:10px;flex-direction:column;gap:3px;line-height:1.15}
+  .room-grid ~ .legend, .kpi-grid ~ .legend{display:none}
 
   /* Room grid: menor */
-  .room-grid{grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px}
-  .room-card{padding:10px 6px 8px}
-  .room-num{font-size:17px}
-  .room-icon{font-size:20px}
+  .room-grid{grid-template-columns:repeat(3,1fr);gap:8px}
+  .room-card{padding:8px 8px 9px;gap:4px;border-radius:12px}
+  .rc-top{flex-direction:column;align-items:flex-start;gap:4px}
+  .room-num{font-size:21px}
+  .rc-chip{font-size:10px;padding:2px 7px}
+  .room-type{font-size:10.5px}
+  .rc-guest{font-size:12px}
+  .rc-out{font-size:10px;margin-top:-2px}
+  .clean-btn{font-size:11px;padding:6px 4px}
+  .suite-group{padding:8px}
+  .suite-rooms{gap:8px}
 
   /* Suite */
   .suite-group{grid-column:span 2}
@@ -246,18 +277,22 @@ input,select,textarea{font-family:'DM Mono',monospace}
 
 <div id="sidebar">
   <div class="logo">🏡</div>
-  <button class="nav-btn active" onclick="showView('map')" title="Mapa de Quartos" data-view="map">🏨</button>
-  <button class="nav-btn" onclick="showView('reservas')" title="Reservas" data-view="reservas">📋</button>
-  <button class="nav-btn" onclick="showView('calendario')" title="Calendário de ocupação" data-view="calendario">🗓️</button>
-  <button class="nav-btn" onclick="showView('hospedes')" title="Hóspedes" data-view="hospedes">👥</button>
-  <button class="nav-btn admin-only" onclick="showView('financeiro')" title="Financeiro" data-view="financeiro">💰</button>
-  <button class="nav-btn admin-only" onclick="showView('relatorios')" title="Relatórios" data-view="relatorios">📈</button>
-  <button class="nav-btn admin-only" onclick="showView('alertas')" title="Alertas de Overbooking" data-view="alertas">⚠️</button>
-  <button class="nav-btn admin-only" onclick="showView('prereservas')" title="Pré-reservas / Leads" data-view="prereservas">📝</button>
-  <button class="nav-btn admin-only" onclick="showView('calendarios')" title="Calendários iCal" data-view="calendarios">📅</button>
-  <button class="nav-btn admin-only" onclick="showView('sync')" title="Sincronizar iCal" data-view="sync">🔄</button>
+  <div class="nav-group">Dia a dia</div>
+  <button class="nav-btn active" onclick="showView('map')" title="Mapa de quartos" data-view="map"><span class="ico">🏨</span><span class="lbl">Mapa</span></button>
+  <button class="nav-btn" onclick="showView('reservas')" title="Reservas" data-view="reservas"><span class="ico">📋</span><span class="lbl">Reservas</span></button>
+  <button class="nav-btn" onclick="showView('calendario')" title="Calendário de ocupação" data-view="calendario"><span class="ico">🗓️</span><span class="lbl">Calendário</span></button>
+  <button class="nav-btn" onclick="showView('hospedes')" title="Hóspedes" data-view="hospedes"><span class="ico">👥</span><span class="lbl">Hóspedes</span></button>
+  <div class="nav-group admin-only">Dinheiro</div>
+  <button class="nav-btn nav-extra admin-only" onclick="showView('financeiro')" title="Financeiro" data-view="financeiro" data-group="Dinheiro"><span class="ico">💰</span><span class="lbl">Financeiro</span></button>
+  <button class="nav-btn nav-extra admin-only" onclick="showView('relatorios')" title="Relatórios" data-view="relatorios" data-group="Dinheiro"><span class="ico">📈</span><span class="lbl">Relatórios</span></button>
+  <div class="nav-group admin-only">Canais</div>
+  <button class="nav-btn nav-extra admin-only" onclick="showView('alertas')" title="Alertas de overbooking" data-view="alertas" data-group="Canais"><span class="ico">⚠️</span><span class="lbl">Alertas</span><span class="dot"></span></button>
+  <button class="nav-btn nav-extra admin-only" onclick="showView('prereservas')" title="Pré-reservas e contatos" data-view="prereservas" data-group="Canais"><span class="ico">📝</span><span class="lbl">Pré-reservas</span></button>
+  <button class="nav-btn nav-extra admin-only" onclick="showView('calendarios')" title="Links iCal para Booking e Airbnb" data-view="calendarios" data-group="Canais"><span class="ico">📅</span><span class="lbl">Links iCal</span></button>
+  <button class="nav-btn nav-extra admin-only" onclick="showView('sync')" title="Sincronizar com Booking e Airbnb" data-view="sync" data-group="Canais"><span class="ico">🔄</span><span class="lbl">Sincronizar</span></button>
+  <button class="nav-btn nav-more" onclick="openMoreMenu()" title="Mais opções" id="nav-more-btn"><span class="ico">☰</span><span class="lbl">Mais</span><span class="dot"></span></button>
   <div style="flex:1"></div>
-  <button class="nav-btn" onclick="showUserMenu()" title="Minha conta" id="user-nav-btn" style="font-size:14px">👤</button>
+  <button class="nav-btn" onclick="showUserMenu()" title="Minha conta" id="user-nav-btn"><span class="ico">👤</span><span class="lbl">Conta</span></button>
 </div>
 
 <div id="main">
@@ -848,6 +883,7 @@ function render() {
   document.getElementById("view-title").textContent  = titles[currentView] || "";
   document.getElementById("today-label").textContent =
     new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  document.getElementById("nav-more-btn")?.classList.toggle("active", !NAV_MAIN.includes(currentView));
   document.querySelectorAll(".nav-btn[data-view]").forEach(b=>{
     b.classList.toggle("active", b.dataset.view===currentView);
   });
@@ -872,12 +908,41 @@ function render() {
         const a = confirmed[i], b = confirmed[j];
         if (a.roomId === b.roomId && a.checkIn < b.checkOut && b.checkIn < a.checkOut) alertCount++;
       }
-    const alertBtn = document.querySelector('.nav-btn[data-view="alertas"]');
-    if (alertBtn) alertBtn.innerHTML = alertCount > 0
-      ? `⚠️<span style="position:absolute;top:4px;right:4px;width:8px;height:8px;background:#ef4444;border-radius:50%"></span>`
-      : "⚠️";
-    if (alertBtn) alertBtn.style.position = "relative";
+    navAlertCount = alertCount;
+    document.querySelector('.nav-btn[data-view="alertas"]')?.classList.toggle("has-alert", alertCount > 0);
+    document.getElementById("nav-more-btn")?.classList.toggle("has-alert", alertCount > 0 && authRole === "admin");
   }
+}
+
+// ─── Menu "Mais" (celular): o que não cabe na barra, separado por grupo ──────
+const NAV_MAIN = ["map", "reservas", "calendario", "hospedes"];
+let navAlertCount = 0;
+// Mesma lista e mesmos nomes do menu lateral (um teste garante que batem).
+const NAV_EXTRA = [
+  { view: "financeiro",  ico: "💰", lbl: "Financeiro",   group: "Dinheiro", admin: true },
+  { view: "relatorios",  ico: "📈", lbl: "Relatórios",   group: "Dinheiro", admin: true },
+  { view: "alertas",     ico: "⚠️", lbl: "Alertas",      group: "Canais",   admin: true },
+  { view: "prereservas", ico: "📝", lbl: "Pré-reservas", group: "Canais",   admin: true },
+  { view: "calendarios", ico: "📅", lbl: "Links iCal",   group: "Canais",   admin: true },
+  { view: "sync",        ico: "🔄", lbl: "Sincronizar",  group: "Canais",   admin: true },
+];
+function moreMenuHtml() {
+  const groups = {};
+  for (const it of NAV_EXTRA.filter(i => authRole === "admin" || !i.admin))
+    (groups[it.group] = groups[it.group] || []).push(it);
+  const item = (it) => `<button class="more-item${it.view === currentView ? " active" : ""}${it.view === "alertas" && navAlertCount > 0 ? " has-alert" : ""}"` +
+    ` onclick="closeModal();showView('${it.view}')"><span class="ico">${it.ico}</span>${esc(it.lbl)}</button>`;
+  let html = "";
+  for (const [g, list] of Object.entries(groups))
+    html += `<div class="more-group">${esc(g)}</div><div class="more-grid">${list.map(item).join("")}</div>`;
+  html += `<div class="more-group">Conta</div><div class="more-grid">
+    <button class="more-item" onclick="showUserMenu()"><span class="ico">👤</span>Minha conta</button></div>`;
+  return html;
+}
+function openMoreMenu() {
+  document.getElementById("modal-title").innerHTML = `Mais opções <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = moreMenuHtml();
+  document.getElementById("modal").style.display = "flex";
 }
 
 function showView(v) {
@@ -1176,6 +1241,22 @@ function getCasaFechadaCheckout() {
   ) || null;
 }
 
+// Cartão de quarto: superfície neutra, faixa e etiqueta na cor do estado (o estado
+// vem escrito, não só pela cor), hóspede e data de saída. Um desenho só para
+// todos os quartos, inclusive 11 e 12 dentro da suíte.
+function roomCardHtml(room, st, res, cf) {
+  const s = STATUS[st] || STATUS.free;
+  const out = res && res.checkOut ? `<div class="rc-out">sai ${esc(fmtDate(res.checkOut).slice(0, 5))}</div>` : "";
+  return `<div class="room-card st-${esc(st)}" style="--sc:${s.color}" onclick="handleRoomClick('${esc(room.id)}')"
+    title="Quarto ${esc(room.id)} — ${esc(s.label)}${res ? " — " + esc(res.guestName) : ""}">
+    <div class="rc-top"><span class="room-num">${esc(room.id)}</span><span class="rc-chip">${s.icon} ${esc(s.label)}</span></div>
+    <div class="room-type">${esc(room.type)} · ${room.climate === "AC" ? "❄ AC" : "💨 Vent."}</div>
+    ${res ? `<div class="rc-guest">${esc(res.guestName)}</div>${out}` : ""}
+    ${!cf && st === "checkin" ? `<button class="clean-btn rc-act" onclick="markCheckedIn('${esc(room.id)}',event)">✓ Check-in feito</button>` : ""}
+    ${!cf && st === "cleaning" ? `<button class="clean-btn rc-act" onclick="markClean('${esc(room.id)}',event)">✓ Limpo</button>` : ""}
+  </div>`;
+}
+
 function renderMap() {
   const t        = todayStr();
   const cfAtiva    = getCasaFechadaToday();
@@ -1203,7 +1284,7 @@ function renderMap() {
     [cfAtiva ? 0 : cleaning.length, "#a855f7","Em Limpeza"],
     [cfAtiva ? 0 : ROOMS.length - occupied.length - cleaning.length, "#22c55e","Disponíveis"],
   ].forEach(([v,c,l])=>{
-    html+=`<div class="kpi"><div class="val" style="color:${c}">${v}</div><div class="lbl">${l}</div></div>`;
+    html+=`<div class="kpi" style="--kc:${c}"><div class="val">${v}</div><div class="lbl"><span class="legend-dot" style="background:${c}"></span>${l}</div></div>`;
   });
   html+=`</div>`;
 
@@ -1225,7 +1306,7 @@ function renderMap() {
   // Legend
   html+=`<div class="legend">`;
   Object.entries(STATUS).forEach(([k,v])=>{
-    html+=`<div class="legend-item"><div class="legend-dot" style="background:${v.color};box-shadow:0 0 5px ${v.color}"></div>${v.label}</div>`;
+    html+=`<div class="legend-item"><div class="legend-dot" style="background:${v.color}"></div>${v.label}</div>`;
   });
   html+=`</div>`;
 
@@ -1236,39 +1317,21 @@ function renderMap() {
     if (room.id==="11") {
       const st11 = cfAtiva ? "occupied" : getRoomStatus("11");
       const st12 = cfAtiva ? "occupied" : getRoomStatus("12");
-      const s11  = STATUS[st11], s12 = STATUS[st12];
       const res11= cfAtiva ? cfAtiva : getRoomRes("11");
       const res12= cfAtiva ? cfAtiva : getRoomRes("12");
       const suiteOccupied = ["11","12"].every(id=>["occupied","checkin"].includes(getRoomStatus(id)));
       const bothFree      = ["11","12"].every(id=>getRoomStatus(id)==="free");
 
-      const roomCard = (room, st, s, res) => {
-        const showClean = st==="cleaning";
-        return `<div class="room-card" style="background:${s.bg};border:1.5px solid ${s.color}44"
-          onclick="handleRoomClick('${room.id}')"
-          onmouseenter="this.style.boxShadow='0 8px 24px ${s.color}22'"
-          onmouseleave="this.style.boxShadow='none'">
-          <div class="room-dot" style="background:${s.color};box-shadow:0 0 6px ${s.color}"></div>
-          <div class="room-num" style="color:${s.color}">${room.id}</div>
-          <div class="room-icon">${s.icon}</div>
-          <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
-          <div class="room-climate" style="color:${s.color}">💨 Vent.</div>
-          ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(res.guestName)}</div>`:""}
-          ${st==="checkin"?`<button class="clean-btn" style="background:#1e3a5f;color:#3b82f6;border-color:#3b82f644" onclick="markCheckedIn('${room.id}',event)">✓ Check-in</button>`:""}
-          ${showClean?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
-        </div>`;
-      };
-
       html+=`<div class="suite-group">
-        <div class="suite-label">🔗 Suíte combinada</div>
+        <div class="suite-label">🔗 Suíte 11+12</div>
         <div class="suite-rooms">
-          ${roomCard(ROOMS.find(r=>r.id==="11"), st11, s11, res11)}
-          ${roomCard(ROOMS.find(r=>r.id==="12"), st12, s12, res12)}
+          ${roomCardHtml(ROOMS.find(r=>r.id==="11"), st11, res11, !!cfAtiva)}
+          ${roomCardHtml(ROOMS.find(r=>r.id==="12"), st12, res12, !!cfAtiva)}
         </div>
         ${bothFree
           ? `<button class="suite-join-btn" onclick="openSuiteModal()">+ Reservar Suíte 11+12 juntos</button>`
           : suiteOccupied
-            ? `<div style="font-size:9px;color:#f59e0b;text-align:center;padding:3px 0;opacity:.7">Suíte ocupada em conjunto</div>`
+            ? `<div style="font-size:12px;color:#f59e0b;text-align:center;padding:4px 0;opacity:.8">Suíte ocupada em conjunto</div>`
             : ""}
       </div>`;
       return; // pula o render individual do 11
@@ -1279,36 +1342,23 @@ function renderMap() {
     const st  = cfAtiva ? "occupied" : getRoomStatus(room.id);
     const s   = STATUS[st];
     const res = cfAtiva ? cfAtiva : getRoomRes(room.id);
-    const showCleanBtn = !cfAtiva && st==="cleaning";
-    html+=`<div class="room-card" style="background:${s.bg};border:1.5px solid ${s.color}44"
-      onclick="handleRoomClick('${room.id}')"
-      onmouseenter="this.style.boxShadow='0 8px 24px ${s.color}22'"
-      onmouseleave="this.style.boxShadow='none'">
-      <div class="room-dot" style="background:${s.color};box-shadow:0 0 6px ${s.color}"></div>
-      <div class="room-num" style="color:${s.color}">${room.id}</div>
-      <div class="room-icon">${s.icon}</div>
-      <div class="room-type" style="color:${s.color};opacity:.85">${room.type}</div>
-      <div class="room-climate" style="color:${s.color}">${room.climate==="AC"?"❄ AC":"💨 Vent."}</div>
-      ${res?`<div style="font-size:8px;color:${s.color};opacity:.75;max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(res.guestName)}</div>`:""}
-      ${st==="checkin"?`<button class="clean-btn" style="background:#1e3a5f;color:#3b82f6;border-color:#3b82f644" onclick="markCheckedIn('${room.id}',event)">✓ Check-in</button>`:""}
-      ${showCleanBtn?`<button class="clean-btn" onclick="markClean('${room.id}',event)">✓ Limpo</button>`:""}
-    </div>`;
+    html+=roomCardHtml(room, st, res, !!cfAtiva);
   });
   html+=`</div>`;
 
   // Hoje agenda
   if (checkins.length||checkouts.length) {
-    html+=`<div class="agenda"><div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:14px">AGENDA HOJE</div>
+    html+=`<div class="agenda"><div class="section-title">Hoje</div>
     <div class="agenda-grid">`;
-    [["CHECK-INS",checkins,"#3b82f6","#0f1e2b"],["CHECK-OUTS",checkouts,"#f59e0b","#2b1e0a"]].forEach(([lbl,list,clr,bg])=>{
+    [["Chegadas (check-in)",checkins,"#3b82f6","#0f1e2b"],["Saídas (check-out)",checkouts,"#f59e0b","#2b1e0a"]].forEach(([lbl,list,clr,bg])=>{
       html+=`<div><div class="agenda-lbl" style="color:${clr}">${lbl}</div>`;
-      if (!list.length) { html+=`<div style="color:var(--bd);font-size:13px">Nenhum hoje</div>`; }
+      if (!list.length) { html+=`<div style="color:var(--mu);font-size:13px">Nenhuma hoje</div>`; }
       list.forEach(r=>{
         html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="handleRoomClick('${r.roomId}')">
           <span class="agenda-room" style="color:${clr}">${r.roomId}</span>
           <div>
             <div style="color:var(--tx);font-size:13px;font-weight:600">${esc(r.guestName)}</div>
-            <div style="color:var(--mu);font-size:10px">${r.adults}ad${r.children>0?` + ${r.children}cr`:""}</div>
+            <div style="color:var(--dm);font-size:12px">${r.adults} adulto(s)${r.children>0?` + ${r.children} criança(s)`:""}</div>
           </div>
         </div>`;
       });
@@ -2033,7 +2083,7 @@ function renderAlertas() {
             ${r.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(r.phone)}</div>` : ""}
             <button onclick="openEditModal('${esc(r.id)}')"
               style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
-              border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:'DM Mono',monospace">
+              border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:inherit">
               Ver reserva →
             </button>
           </div>`).join("")}
@@ -2060,7 +2110,7 @@ function renderAlertas() {
             ${pre.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(pre.phone)}</div>` : ""}
             <button onclick="openPreReservaModal('${esc(pre.id)}')"
               style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
-              border:1px solid #f59e0b44;background:var(--bg2);color:#f59e0b;cursor:pointer;font-family:'DM Mono',monospace">
+              border:1px solid #f59e0b44;background:var(--bg2);color:#f59e0b;cursor:pointer;font-family:inherit">
               Editar →
             </button>
           </div>
@@ -2070,7 +2120,7 @@ function renderAlertas() {
             <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(clash.checkIn)} → ${fmtDate(clash.checkOut)}</div>
             <button onclick="openEditModal('${esc(clash.id)}')"
               style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
-              border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:'DM Mono',monospace">
+              border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:inherit">
               Ver reserva →
             </button>
           </div>
@@ -2294,13 +2344,13 @@ function renderCalUrls() {
       </div>
       <input readonly value="${esc(url)}"
         style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
-        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:'DM Mono',monospace;
+        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);
         cursor:pointer" onclick="this.select()"
         title="Clique para selecionar">
       <button onclick="copyCalUrl('${esc(url)}')"
         style="flex-shrink:0;font-size:10px;padding:5px 10px;border-radius:6px;
         border:1px solid var(--bd);background:var(--bg3);color:var(--tx);
-        cursor:pointer;font-family:'DM Mono',monospace">
+        cursor:pointer;font-family:inherit">
         Copiar
       </button>
     </div>`;
@@ -2343,7 +2393,7 @@ function renderCalendarios() {
   const copyBtn = (url) =>
     `<button onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='📋 Copiar',2000)})"
       style="font-size:10px;padding:4px 10px;border-radius:6px;border:1px solid var(--bd);
-      background:var(--bg3);color:var(--tx);cursor:pointer;font-family:'DM Mono',monospace;
+      background:var(--bg3);color:var(--tx);cursor:pointer;font-family:inherit;
       white-space:nowrap;flex-shrink:0">📋 Copiar</button>`;
 
   let html = `
@@ -2506,7 +2556,7 @@ function renderSync() {
       <div style="width:42px;color:#3b82f6;font-weight:800;font-size:12px;text-align:center;
         background:#0f1e2b;border-radius:6px;padding:4px 2px;border:1px solid #3b82f644">CF</div>
       <input style="flex:1;background:var(--bg0);border:1px solid ${cfUrl?"#3b82f655":"var(--bd)"};border-radius:8px;
-        color:${cfUrl?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
+        color:${cfUrl?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:inherit"
         value="${esc(cfUrl)}" placeholder="URL iCal do anúncio da pousada toda (Airbnb)"
         oninput="setIcalUrl('airbnb','CF',this.value)">
     </div>
@@ -2534,7 +2584,7 @@ function renderSync() {
           <div style="width:42px;color:#f59e0b;font-weight:800;font-size:12px;text-align:center;
             background:#2b1e0a;border-radius:6px;padding:4px 2px;border:1px solid #f59e0b44">11+12</div>
           <input style="flex:1;background:var(--bg0);border:1px solid ${val?"#f59e0b55":"var(--bd)"};border-radius:8px;
-            color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
+            color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:inherit"
             value="${esc(val)}" placeholder="URL iCal única do anúncio Suíte 11+12 no Airbnb"
             oninput="setIcalUrl('airbnb','11+12',this.value)">
         </div>
@@ -2551,7 +2601,7 @@ function renderSync() {
       html+=`<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
         <div style="width:32px;color:var(--bl);font-weight:800;font-size:14px;text-align:center">${r.id}</div>
         <input style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
-          color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:'DM Mono',monospace"
+          color:${val?"var(--tx)":"var(--bd)"};padding:8px 12px;font-size:11px;outline:none;font-family:inherit"
           value="${esc(val)}" placeholder="URL iCal — Qto ${r.id} (${r.type})"
           oninput="setIcalUrl('${src}','${r.id}',this.value)">
       </div>`;
