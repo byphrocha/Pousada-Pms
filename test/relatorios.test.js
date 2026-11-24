@@ -129,7 +129,7 @@ test("tela: relatório mostra ocupação, barras por quarto com tooltip e caixa"
     cash: { ...R.cash({ paidInMonth: [{ kind: "sinal", amount: 300 }], transactions: [{ type: "expense", amount: 120 }] }), paymentsOn: true },
   })};`);
   const html = fe.run("renderRelatorios()");
-  assert.match(html, /OCUPAÇÃO[\s\S]*1,1%/);
+  assert.match(html, /Ocupação[\s\S]*1,1%/);
   assert.match(html, /title="Quarto 20: 3 de 31 noites com hóspede/);
   assert.match(html, /= Resultado[\s\S]*180,00/);
   assert.match(html, /No Booking toda linha importada se chama "CLOSED"/);

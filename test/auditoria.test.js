@@ -132,7 +132,7 @@ test("tela: histórico legível (quem, ação, antes → depois) e sem HTML inje
     { at: "2030-01-05T13:40:00Z", username: "staff", action: "reserva.cancelar", changes: { status: ["confirmed", "cancelled"] } },
     { at: "2030-01-04T10:00:00Z", username: "<b>x</b>", action: "reserva.editar", changes: { check_out: ["2030-03-12", "2030-03-13"], privados: ["nome"] } },
   ])`);
-  assert.match(html, /HISTÓRICO \(2\)/);
+  assert.match(html, /Histórico \(2\)/);
   assert.match(html, /staff cancelou/);
   assert.match(html, /saída: 12\/03\/2030 → 13\/03\/2030 · alterou nome/);
   assert.doesNotMatch(html, /<b>x<\/b>/);

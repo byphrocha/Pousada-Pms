@@ -64,6 +64,7 @@ input,select,textarea{font-family:inherit}
 .kpi{background:var(--bg2);border:1px solid var(--bd);border-radius:14px;padding:14px 16px;text-align:left}
 .kpi .val{font-size:30px;font-weight:700;font-family:'Fraunces',serif;line-height:1;font-variant-numeric:lining-nums;color:var(--tx)}
 .kpi .lbl{font-size:12px;color:var(--dm);margin-top:6px;font-weight:600;display:flex;align-items:center;gap:6px}
+.fin-kpi{font-size:22px;white-space:nowrap;font-variant-numeric:lining-nums}
 .kpi .lbl .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
 /* Room grid */
@@ -238,6 +239,8 @@ input,select,textarea{font-family:inherit}
 /* ─── Financeiro ─────────────────────────────────────────────────────────── */
 @media(max-width:640px){
   .fin-lists{grid-template-columns:1fr !important}
+  .fin-kpi{font-size:15px}
+  .dup-new{display:none}
 }
 /* ─── Login ───────────────────────────────────────────────────────────────── */
 #login-screen{position:fixed;inset:0;background:var(--bg0);display:flex;align-items:center;
@@ -502,8 +505,8 @@ function showUserMenu() {
     </div>
     ${isAdmin ? `
     <div style="margin-bottom:24px">
-      <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:12px">
-        ALTERAR SENHA
+      <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:12px">
+        Alterar senha
       </div>
       <input type="password" id="cp-cur" placeholder="Senha atual"
         style="width:100%;background:var(--bg0);border:1px solid var(--bd);border-radius:8px;
@@ -1176,11 +1179,11 @@ function renderRelatorios() {
   if (!reportData || reportData.month !== reportMonth) return head + `<div style="color:var(--mu)">Carregando…</div>`;
   const o = reportData.occupancy, c = reportData.cash;
   const tile = (label, value, sub, color) => `<div style="flex:1;min-width:150px;background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:14px">
-    <div style="font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.1em">${label}</div>
+    <div style="font-size:12px;color:var(--mu);font-weight:700">${label}</div>
     <div style="font-size:clamp(18px,5vw,24px);font-weight:700;white-space:nowrap;color:${color || "var(--tx)"};margin-top:4px">${value}</div>
     <div style="font-size:11px;color:var(--mu);margin-top:2px">${sub}</div></div>`;
   const card = (title, body) => `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px">
-    <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:10px">${title}</div>${body}</div>`;
+    <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:10px">${title}</div>${body}</div>`;
   const chLabel = { direto: "Direto", airbnb: "Airbnb", booking: "Booking", outro: "Outro" };
   const chRows = Object.entries(o.channels).filter(([k, v]) => v > 0 || k !== "outro")
     .map(([k, v]) => reportBar(chLabel[k] || k, v, o.occupied, `${v} noites · ${o.occupied ? Math.round(v / o.occupied * 100) : 0}%`,
@@ -1194,17 +1197,17 @@ function renderRelatorios() {
     <td style="padding:5px 0;text-align:right;font-weight:${strong ? 700 : 400};color:${color || "var(--tx)"}">${value}</td></tr>`;
   return head + `
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-      ${tile("OCUPAÇÃO", `${String(o.pct).replace(".", ",")}%`, `${o.occupied} de ${o.available} noites (9 quartos × ${o.days} dias)`)}
-      ${tile("RESULTADO DO MÊS", fmtMoney(c.result), "recebido − estornos + outras receitas − despesas", c.result < 0 ? "var(--rd)" : "var(--tx)")}
-      ${c.paymentsOn ? tile("A RECEBER NO MÊS", fmtMoney(c.receivableInMonth), `${c.counts.dueInMonth} parcela(s) com vencimento no mês`) : ""}
-      ${c.paymentsOn && c.overdueTotal > 0 ? tile("🔴 VENCIDAS", fmtMoney(c.overdueTotal), `${c.counts.overdue} parcela(s), todos os meses`, "var(--rd)") : ""}
+      ${tile("Ocupação", `${String(o.pct).replace(".", ",")}%`, `${o.occupied} de ${o.available} noites (9 quartos × ${o.days} dias)`)}
+      ${tile("Resultado do mês", fmtMoney(c.result), "recebido − estornos + outras receitas − despesas", c.result < 0 ? "var(--rd)" : "var(--tx)")}
+      ${c.paymentsOn ? tile("A receber no mês", fmtMoney(c.receivableInMonth), `${c.counts.dueInMonth} parcela(s) com vencimento no mês`) : ""}
+      ${c.paymentsOn && c.overdueTotal > 0 ? tile("🔴 Vencidas", fmtMoney(c.overdueTotal), `${c.counts.overdue} parcela(s), todos os meses`, "var(--rd)") : ""}
     </div>
-    ${card("OCUPAÇÃO POR QUARTO", roomRows +
+    ${card("Ocupação por quarto", roomRows +
       (o.conflicts ? `<div style="font-size:11px;color:var(--dm);margin-top:8px">⚠️ ${o.conflicts} noite(s) com duas reservas no mesmo quarto (contadas uma vez). Veja os Alertas.</div>` : ""))}
-    ${card("NOITES OCUPADAS POR CANAL", chRows +
+    ${card("Noites ocupadas por canal", chRows +
       `<div style="font-size:11px;color:var(--mu);margin-top:8px">No Booking toda linha importada se chama "CLOSED", inclusive datas fechadas manualmente: elas contam como ocupação.` +
       (o.blockedOnly ? ` Bloqueios do Airbnb sem hóspede (não contados): ${o.blockedOnly} noite(s).` : "") + `</div>`)}
-    ${card("CAIXA DO MÊS", `<table style="width:100%;font-size:12px;border-collapse:collapse">
+    ${card("Caixa do mês", `<table style="width:100%;font-size:12px;border-collapse:collapse">
       ${line("Recebido de reservas diretas", fmtMoney(c.received))}
       ${line("(−) Estornos devolvidos", fmtMoney(c.refunded))}
       ${line("Outras receitas do Financeiro", fmtMoney(c.otherIncome))}
@@ -1416,7 +1419,7 @@ function renderReservas() {
 
   html+=`</div>
     <div style="display:flex;gap:8px;margin-left:auto">
-      <button class="btn btn-green" onclick="openNewModal()">+ Nova Reserva</button>
+      <button class="btn btn-green dup-new" onclick="openNewModal()">+ Nova Reserva</button>
       <button class="btn" style="background:#1e3a5f;border-color:#3b82f6;color:#3b82f6" onclick="openCasaTodaModal()">🏡 Casa Toda</button>
     </div>
   </div>
@@ -1685,8 +1688,8 @@ function openGuestModal(guestId) {
     </div>
     ${guestRes.length ? `
     <div style="margin-bottom:20px">
-      <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:10px">
-        HISTÓRICO (${guestRes.length} reserva${guestRes.length!==1?"s":""})
+      <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:10px">
+        Histórico (${guestRes.length} reserva${guestRes.length!==1?"s":""})
       </div>
       ${guestRes.slice(0,5).map(r=>`
         <div style="background:var(--bg0);border-radius:8px;padding:8px 12px;margin-bottom:6px;
@@ -1790,16 +1793,16 @@ function renderFinanceiro() {
   <!-- KPIs -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
     <div style="background:var(--bg1);border:1px solid #22c55e44;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:11px;color:#22c55e;font-weight:700;letter-spacing:.1em;margin-bottom:6px">RECEITAS</div>
-      <div style="font-size:22px;font-weight:700;color:#22c55e;font-family:'Fraunces',serif">${fmtMoney(totIn)}</div>
+      <div style="font-size:13px;color:#22c55e;font-weight:700;margin-bottom:6px">Receitas</div>
+      <div class="fin-kpi" style="font-weight:700;color:#22c55e;font-family:'Fraunces',serif">${fmtMoney(totIn)}</div>
     </div>
     <div style="background:var(--bg1);border:1px solid #ef444444;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:11px;color:#ef4444;font-weight:700;letter-spacing:.1em;margin-bottom:6px">DESPESAS</div>
-      <div style="font-size:22px;font-weight:700;color:#ef4444;font-family:'Fraunces',serif">${fmtMoney(totOut)}</div>
+      <div style="font-size:13px;color:#ef4444;font-weight:700;margin-bottom:6px">Despesas</div>
+      <div class="fin-kpi" style="font-weight:700;color:#ef4444;font-family:'Fraunces',serif">${fmtMoney(totOut)}</div>
     </div>
     <div style="background:var(--bg1);border:1px solid ${balance>=0?"#3b82f6":"#f59e0b"}44;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:11px;color:${balance>=0?"#3b82f6":"#f59e0b"};font-weight:700;letter-spacing:.1em;margin-bottom:6px">SALDO</div>
-      <div style="font-size:22px;font-weight:700;color:${balance>=0?"#3b82f6":"#f59e0b"};font-family:'Fraunces',serif">${fmtMoney(balance)}</div>
+      <div style="font-size:13px;color:${balance>=0?"#3b82f6":"#f59e0b"};font-weight:700;margin-bottom:6px">Saldo</div>
+      <div class="fin-kpi" style="font-weight:700;color:${balance>=0?"#3b82f6":"#f59e0b"};font-family:'Fraunces',serif">${fmtMoney(balance)}</div>
     </div>
   </div>
 
@@ -1809,7 +1812,7 @@ function renderFinanceiro() {
   ${renderFinChart(income, expense)}
 
   <!-- Listas -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
+  <div class="fin-lists" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
     ${renderFinList("income", income)}
     ${renderFinList("expense", expense)}
   </div>`;
@@ -1825,7 +1828,7 @@ function renderReceivables() {
   const late = list.filter(p => p.overdue);
   return `<div style="background:var(--bg1);border:1px solid ${late.length ? "#ef444466" : "var(--bd)"};border-radius:12px;padding:16px;margin-bottom:24px">
     <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-      <div style="font-size:11px;color:#f59e0b;font-weight:700;letter-spacing:.1em">A RECEBER${late.length ? ` · <span style="color:#ef4444">${late.length} VENCIDA(S)</span>` : ""}</div>
+      <div style="font-size:13px;color:#f59e0b;font-weight:700">A receber${late.length ? ` · <span style="color:#ef4444">${late.length} vencida(s)</span>` : ""}</div>
       <div style="font-size:13px;font-weight:700;color:#f59e0b">${fmtMoney(total)}</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px">
@@ -1866,10 +1869,10 @@ function renderFinChart(income, expense) {
   };
 
   return `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
-    <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:14px">DISTRIBUIÇÃO DO MÊS</div>
-    ${allInc.length ? `<div style="font-size:10px;color:#22c55e;font-weight:700;letter-spacing:.08em;margin-bottom:8px">ENTRADAS</div>
+    <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:14px">Distribuição do mês</div>
+    ${allInc.length ? `<div style="font-size:12px;color:#22c55e;font-weight:700;margin-bottom:8px">Entradas</div>
       ${allInc.map(([k,v])=>bar(k,v,"#22c55e")).join("")}` : ""}
-    ${allExp.length ? `<div style="font-size:10px;color:#ef4444;font-weight:700;letter-spacing:.08em;margin:12px 0 8px">SAÍDAS</div>
+    ${allExp.length ? `<div style="font-size:12px;color:#ef4444;font-weight:700;margin:12px 0 8px">Saídas</div>
       ${allExp.map(([k,v])=>bar(k,v,"#ef4444")).join("")}` : ""}
   </div>`;
 }
@@ -1877,17 +1880,17 @@ function renderFinChart(income, expense) {
 function renderFinList(type, list) {
   const isIncome = type === "income";
   const color    = isIncome ? "#22c55e" : "#ef4444";
-  const title    = isIncome ? "ENTRADAS" : "SAÍDAS";
+  const title    = isIncome ? "Entradas" : "Saídas";
 
   if (!list.length) return `
     <div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
-      <div style="font-size:11px;color:${color};font-weight:700;letter-spacing:.1em;margin-bottom:12px">${title}</div>
+      <div style="font-size:13px;color:${color};font-weight:700;margin-bottom:12px">${title}</div>
       <div style="text-align:center;color:var(--mu);padding:24px 0;font-size:13px">Nenhum lançamento</div>
     </div>`;
 
   return `
     <div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
-      <div style="font-size:11px;color:${color};font-weight:700;letter-spacing:.1em;margin-bottom:12px">${title}</div>
+      <div style="font-size:13px;color:${color};font-weight:700;margin-bottom:12px">${title}</div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${list.map(t => {
           const cat  = FIN_CATEGORIES[t.category] || {label:t.category, icon:"•"};
@@ -1900,7 +1903,7 @@ function renderFinList(type, list) {
             <span style="font-size:16px">${cat.icon}</span>
             <div style="flex:1;min-width:0">
               <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.readonly ? "💳 " : ""}${esc(t.description)}</div>
-              <div style="font-size:10px;color:var(--mu);margin-top:1px">${cat.label} · ${esc(t.date)}${t.readonly ? " · via reserva" : ""}</div>
+              <div style="font-size:10px;color:var(--mu);margin-top:1px">${esc(cat.label)} · ${esc(fmtDate(t.date))}${t.readonly ? " · via reserva" : ""}</div>
             </div>
             <div style="font-size:13px;font-weight:700;color:${color};flex-shrink:0">${fmtMoney(t.amount)}</div>
           </div>`;
@@ -2054,8 +2057,8 @@ function renderAlertas() {
 
   // Conflitos entre reservas confirmadas
   if (conflicts.length > 0) {
-    html += `<div style="font-size:11px;color:#ef4444;font-weight:700;letter-spacing:.1em;margin-bottom:12px">
-      OVERBOOKING — RESERVAS CONFIRMADAS</div>`;
+    html += `<div style="font-size:13px;color:#ef4444;font-weight:700;margin-bottom:12px">
+      Overbooking entre reservas confirmadas</div>`;
 
     conflicts.forEach(({ a, b }) => {
       const srcA = SRC_COLOR[a.source] || "var(--mu)";
@@ -2077,7 +2080,7 @@ function renderAlertas() {
           ${[a,b].map((r,i) => `
           <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;
             border-left:3px solid ${i===0?srcA:srcB}">
-            <div style="font-size:10px;color:${i===0?srcA:srcB};font-weight:700;letter-spacing:.08em;margin-bottom:4px">${esc(r.source).toUpperCase()}</div>
+            <div style="font-size:12px;color:${i===0?srcA:srcB};font-weight:700;margin-bottom:4px">${esc(r.source)}</div>
             <div style="font-weight:700;font-size:13px">${esc(r.guestName)}</div>
             <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</div>
             ${r.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(r.phone)}</div>` : ""}
@@ -2094,17 +2097,17 @@ function renderAlertas() {
 
   // Pré-reservas conflitando com confirmadas
   if (preConflicts.length > 0) {
-    html += `<div style="font-size:11px;color:#f59e0b;font-weight:700;letter-spacing:.1em;
-      margin:20px 0 12px">PRÉ-RESERVAS COM CONFLITO</div>`;
+    html += `<div style="font-size:13px;color:#f59e0b;font-weight:700;
+      margin:20px 0 12px">Pré-reservas com conflito</div>`;
     preConflicts.forEach(({ pre, clash }) => {
       const srcClr = SRC_COLOR[clash.source] || "var(--mu)";
       html += `<div style="background:var(--bg2);border:1.5px solid #f59e0b44;border-radius:12px;
         padding:16px 18px;margin-bottom:12px">
         <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:10px">
-          ⚠️ PRÉ-RESERVA vs CONFIRMADA — Quarto ${esc(pre.room_id||"")}</div>
+          ⚠️ Pré-reserva × confirmada, quarto ${esc(pre.room_id||"")}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;border-left:3px solid #f59e0b">
-            <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:4px">PRÉ-RESERVA</div>
+            <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:4px">Pré-reserva</div>
             <div style="font-weight:700;font-size:13px">${esc(pre.guest_name||"")}</div>
             <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(pre.check_in)} → ${fmtDate(pre.check_out)}</div>
             ${pre.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(pre.phone)}</div>` : ""}
@@ -2115,7 +2118,7 @@ function renderAlertas() {
             </button>
           </div>
           <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;border-left:3px solid ${srcClr}">
-            <div style="font-size:10px;color:${srcClr};font-weight:700;margin-bottom:4px">${esc(clash.source).toUpperCase()} — CONFIRMADA</div>
+            <div style="font-size:10px;color:${srcClr};font-weight:700;margin-bottom:4px">${esc(clash.source)}: confirmada</div>
             <div style="font-weight:700;font-size:13px">${esc(clash.guestName)}</div>
             <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(clash.checkIn)} → ${fmtDate(clash.checkOut)}</div>
             <button onclick="openEditModal('${esc(clash.id)}')"
@@ -2165,7 +2168,7 @@ function renderPreReservas() {
 
   const renderGroup = (list, title, color) => {
     if (!list.length) return "";
-    let s = `<div style="font-size:11px;color:${color};font-weight:700;letter-spacing:.1em;margin:20px 0 10px">${title}</div>`;
+    let s = `<div style="font-size:13px;color:${color};font-weight:700;margin:20px 0 10px">${title}</div>`;
     list.forEach(p => {
       const st = PRE_STATUS[p.status] || PRE_STATUS.aguardando;
       const room = ROOMS.find(r => r.id === p.room_id);
@@ -2207,8 +2210,8 @@ function renderPreReservas() {
     return s;
   };
 
-  html += renderGroup(active, "ATIVAS / AGUARDANDO", "#f59e0b");
-  html += renderGroup(past,   "PASSADAS / RECUSADAS", "var(--mu)");
+  html += renderGroup(active, "Ativas ou aguardando", "#f59e0b");
+  html += renderGroup(past,   "Passadas ou recusadas", "var(--mu)");
   return html;
 }
 
@@ -2410,8 +2413,8 @@ function renderCalendarios() {
   </div>
 
   <!-- URLs por quarto -->
-  <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:12px">
-    URLS POR QUARTO
+  <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:12px">
+    URLs por quarto
   </div>
   <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:28px">`;
 
@@ -2450,8 +2453,8 @@ function renderCalendarios() {
   </div>
 
   <!-- Passo a passo Booking -->
-  <div style="font-size:11px;color:#0066cc;font-weight:700;letter-spacing:.1em;margin-bottom:12px">
-    PASSO A PASSO — BOOKING.COM
+  <div style="font-size:13px;color:#0066cc;font-weight:700;margin-bottom:12px">
+    Passo a passo no Booking.com
   </div>
   <div style="background:var(--bg2);border:1px solid #0066cc33;border-radius:12px;
     padding:18px 20px;margin-bottom:20px;font-size:13px;line-height:1.9;color:var(--dm)">
@@ -2475,8 +2478,8 @@ function renderCalendarios() {
   </div>
 
   <!-- Passo a passo Airbnb -->
-  <div style="font-size:11px;color:#ff5a5f;font-weight:700;letter-spacing:.1em;margin-bottom:12px">
-    PASSO A PASSO — AIRBNB
+  <div style="font-size:13px;color:#ff5a5f;font-weight:700;margin-bottom:12px">
+    Passo a passo no Airbnb
   </div>
   <div style="background:var(--bg2);border:1px solid #ff5a5f33;border-radius:12px;
     padding:18px 20px;margin-bottom:20px;font-size:13px;line-height:1.9;color:var(--dm)">
@@ -2499,8 +2502,8 @@ function renderCalendarios() {
   </div>
 
   <!-- Como funciona no total -->
-  <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:12px">
-    FLUXO COMPLETO ANTI-OVERBOOKING
+  <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:12px">
+    Como o PMS evita overbooking
   </div>
   <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;
     padding:18px 20px;font-size:12px;line-height:2;color:var(--dm)">
@@ -2528,8 +2531,8 @@ function renderSync() {
   let html = `
   <!-- ── Seção: URLs de exportação do calendário ── -->
   <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:16px 18px;margin-bottom:24px">
-    <div style="font-size:12px;color:#22c55e;font-weight:700;letter-spacing:.08em;margin-bottom:12px">
-      📤 EXPORTAR CALENDÁRIO DO PMS → BOOKING / AIRBNB
+    <div style="font-size:12px;color:#22c55e;font-weight:700;margin-bottom:12px">
+      📤 Exportar o calendário do PMS para Booking e Airbnb
     </div>
     <div style="font-size:12px;color:var(--dm);margin-bottom:14px;line-height:1.6">
       Cole estas URLs no Booking e Airbnb para que eles bloqueiem automaticamente
@@ -2549,8 +2552,8 @@ function renderSync() {
   // iCal pousada toda (Airbnb)
   const cfUrl = (icalUrls["airbnb"]||{})["CF"]||"";
   html+=`<div style="margin-bottom:22px;background:#0f1e2b;border:1px solid #3b82f644;border-radius:12px;padding:14px">
-    <div style="font-size:12px;color:#3b82f6;font-weight:700;letter-spacing:.08em;margin-bottom:10px">
-      🏡 POUSADA TODA — Casa Fechada (Airbnb)
+    <div style="font-size:12px;color:#3b82f6;font-weight:700;margin-bottom:10px">
+      🏡 Pousada toda: Casa Fechada (Airbnb)
     </div>
     <div style="display:flex;gap:10px;align-items:center">
       <div style="width:42px;color:#3b82f6;font-weight:800;font-size:12px;text-align:center;
@@ -2567,7 +2570,7 @@ function renderSync() {
 
   [["booking","🔵 Booking.com","#0066cc"],["airbnb","🔴 Airbnb","#ff5a5f"]].forEach(([src,label,clr])=>{
     html+=`<div style="margin-bottom:22px">
-      <div style="font-size:12px;color:${clr};font-weight:700;letter-spacing:.08em;margin-bottom:12px">${label}</div>`;
+      <div style="font-size:12px;color:${clr};font-weight:700;margin-bottom:12px">${label}</div>`;
 
     // Airbnb: suíte 11+12 tem um único link — mostra campo combinado em vez de dois separados
     const roomsToShow = src==="airbnb"
@@ -2577,8 +2580,8 @@ function renderSync() {
     if (src==="airbnb") {
       const val = (icalUrls["airbnb"]||{})["11+12"]||"";
       html+=`<div style="margin-bottom:10px">
-        <div style="font-size:10px;color:#f59e0b;font-weight:700;letter-spacing:.06em;margin-bottom:6px">
-          🔗 SUÍTE 11+12 (anúncio combinado)
+        <div style="font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:6px">
+          🔗 Suíte 11+12 (anúncio combinado)
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <div style="width:42px;color:#f59e0b;font-weight:800;font-size:12px;text-align:center;
@@ -2593,7 +2596,7 @@ function renderSync() {
         </div>
       </div>
       <div style="border-top:1px solid var(--bd);margin:12px 0 10px"></div>
-      <div style="font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.06em;margin-bottom:8px">QUARTOS INDIVIDUAIS</div>`;
+      <div style="font-size:12px;color:var(--mu);font-weight:700;margin-bottom:8px">Quartos individuais</div>`;
     }
 
     roomsToShow.forEach(r=>{
@@ -2637,7 +2640,7 @@ async function loadFeedInventory() {
   render();
 }
 function renderFeedInventory() {
-  const head = `<div style="margin-top:20px;font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em">QUEM CONSULTA OS CALENDÁRIOS DO PMS</div>`;
+  const head = `<div style="margin-top:20px;font-size:13px;color:var(--mu);font-weight:700">Quem consulta os calendários do PMS</div>`;
   if (feedInventory === null)
     return `${head}<button class="btn" style="margin-top:8px" onclick="loadFeedInventory()">📋 Ver inventário de acessos</button>`;
   if (!feedInventory.length)
@@ -2834,7 +2837,7 @@ async function loadHistoryBox(resId) {
 }
 function renderHistoryBox(items) {
   if (!items.length) return `<div style="font-size:11px;color:var(--mu)">🕘 Sem alterações registradas.</div>`;
-  return `<details><summary style="cursor:pointer;font-size:11px;font-weight:700;letter-spacing:.1em">🕘 HISTÓRICO (${items.length})</summary>
+  return `<details><summary style="cursor:pointer;font-size:13px;font-weight:700">🕘 Histórico (${items.length})</summary>
     <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px">
       ${items.map(it => {
         const when = new Date(it.at);
@@ -2892,14 +2895,14 @@ function renderPaymentsBox(d, resId) {
     </div>`;
   }).join("");
   const kpi = (label, val, color) => `<div style="flex:1;min-width:90px;background:var(--bg0);border-radius:8px;padding:8px;text-align:center">
-    <div style="font-size:9px;color:var(--mu);letter-spacing:.08em">${label}</div>
+    <div style="font-size:11px;color:var(--mu)">${label}</div>
     <div style="font-size:14px;font-weight:700;color:${color}">${fmtMoney(val)}</div></div>`;
   return `
-    <div style="font-size:11px;color:var(--mu);font-weight:700;letter-spacing:.1em;margin-bottom:8px">💳 PAGAMENTOS${d.label && d.label !== "" ? " — " + esc(d.label) : ""}</div>
+    <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:8px">💳 Pagamentos${d.label && d.label !== "" ? " — " + esc(d.label) : ""}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      ${kpi("CONTRATADO", s.contracted, "var(--tx)")}
-      ${kpi("RECEBIDO", s.net, "#22c55e")}
-      ${kpi("SALDO", s.balance, s.balance > 0 ? "#f59e0b" : "#3b82f6")}
+      ${kpi("Contratado", s.contracted, "var(--tx)")}
+      ${kpi("Recebido", s.net, "#22c55e")}
+      ${kpi("Saldo", s.balance, s.balance > 0 ? "#f59e0b" : "#3b82f6")}
     </div>
     ${legacyIncomeWarning(d.legacyIncome)}
     ${s.contracted === 0 ? `<div style="font-size:11px;color:#f59e0b;margin-bottom:8px">Informe o "Valor Total" da reserva acima e salve para ver o saldo.</div>` : ""}
