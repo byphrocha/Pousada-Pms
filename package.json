@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "db:verificar": "scripts/verificar-migrations.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

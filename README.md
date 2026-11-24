@@ -37,6 +37,20 @@ npm test
 
 Os testes não acessam banco nem rede: usam dados fictícios e um Supabase simulado.
 
+## Banco: baseline e migrations
+
+- `db/00_baseline_schema.sql`: esquema de antes das migrations (do inventário de 23/11/2026).
+- `db/migrations/AAAAMMDD_NN_nome.sql`: aplicadas nesta ordem; cada uma tem o seu `.down.sql`.
+- Ensaio completo num Postgres **vazio e local** (o script recusa outro host):
+
+```bash
+PGHOST=localhost PGUSER=postgres PGDATABASE=ensaio npm run db:verificar
+```
+
+Ele aplica baseline e migrations, confere as regras (sobreposição recusada, CF tudo ou nada,
+RLS em todas as tabelas, auditoria só por inclusão), desfaz tudo com os `.down.sql` e reaplica.
+O CI faz o mesmo em Postgres 17 a cada PR. Migration nova sem `.down.sql` reprova.
+
 ## Regras para contribuir
 
 - Nunca rode migrations ou scripts de escrita no banco de produção sem backup e restauração testados.
