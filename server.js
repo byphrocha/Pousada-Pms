@@ -1156,29 +1156,60 @@ async function addRoomStates(day, add) {
     return merged;
   });
 }
+async function removeRoomState(day, kind, roomId) {
+  return withRoomStateLock(async () => {
+    const cur = await readRoomStates(day);
+    cur[kind] = cur[kind].filter(r => r !== roomId);
+    const { error } = await supabase.from("settings").upsert({ key: "room_states_" + day, value: cur });
+    if (error) throw new Error("falha ao gravar estados dos quartos");
+    return cur;
+  });
+}
 const onlyRooms = (list) => Array.isArray(list) ? list.map(String).filter(r => ROOM_STATE_ROOMS.includes(r)) : [];
+// Express 4 não captura erro de função async: sem isto o pedido ficava pendurado
+// até estourar o tempo, sem aviso (PMS-012). Agora responde 503 com mensagem.
+const roomStateRoute = (fn) => async (req, res) => {
+  try { await fn(req, res); }
+  catch (e) {
+    console.error(`[room-states] ${e.message}`);
+    if (!res.headersSent) res.status(503).json({ error: "Não foi possível salvar/ler a situação dos quartos. Tente de novo." });
+  }
+};
+const ROOM_STATE_ACTION = { cleaned: "quarto.limpo", checkedIn: "quarto.checkin" };
 
-app.get("/room-states", authMiddleware, async (req, res) => {
+app.get("/room-states", authMiddleware, roomStateRoute(async (req, res) => {
   res.json(await readRoomStates(todayBrasilia()));
-});
+}));
 
 // Rota antiga (aparelhos com a tela antiga em cache): soma, não substitui.
-app.post("/room-states", authMiddleware, async (req, res) => {
+app.post("/room-states", authMiddleware, roomStateRoute(async (req, res) => {
   const { cleaned, checkedIn } = req.body || {};
   const merged = await addRoomStates(todayBrasilia(), { cleaned: onlyRooms(cleaned), checkedIn: onlyRooms(checkedIn) });
   res.json({ ok: true, ...merged });
-});
+}));
 
 // Marca um quarto: POST /room-states/24/cleaned ou /room-states/24/checkedIn
-app.post("/room-states/:roomId/:kind", authMiddleware, async (req, res) => {
+app.post("/room-states/:roomId/:kind", authMiddleware, roomStateRoute(async (req, res) => {
   const { roomId, kind } = req.params;
-  if (!ROOM_STATE_ROOMS.includes(roomId) || !["cleaned", "checkedIn"].includes(kind))
+  if (!ROOM_STATE_ROOMS.includes(roomId) || !ROOM_STATE_ACTION[kind])
     return res.status(400).json({ error: "Quarto ou tipo inválido" });
   const add = { cleaned: [], checkedIn: [] };
   add[kind].push(roomId);
   const merged = await addRoomStates(todayBrasilia(), add);
+  await audit(req, ROOM_STATE_ACTION[kind], "room", roomId, null, {});
   res.json({ ok: true, ...merged });
-});
+}));
+
+// Desfaz uma marcação feita por engano (PMS-013). Mesma fila das marcações:
+// um aparelho não apaga a marcação de outro quarto feita ao mesmo tempo.
+app.delete("/room-states/:roomId/:kind", authMiddleware, roomStateRoute(async (req, res) => {
+  const { roomId, kind } = req.params;
+  if (!ROOM_STATE_ROOMS.includes(roomId) || !ROOM_STATE_ACTION[kind])
+    return res.status(400).json({ error: "Quarto ou tipo inválido" });
+  const merged = await removeRoomState(todayBrasilia(), kind, roomId);
+  await audit(req, ROOM_STATE_ACTION[kind] + ".desfazer", "room", roomId, null, {});
+  res.json({ ok: true, ...merged });
+}));
 
 app.delete("/guests/:id", authMiddleware, adminOnly, async (req, res) => {
   const { error } = await supabase.from("guests").delete().eq("id", req.params.id);
