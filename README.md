@@ -51,6 +51,17 @@ Ele aplica baseline e migrations, confere as regras (sobreposição recusada, CF
 RLS em todas as tabelas, auditoria só por inclusão), desfaz tudo com os `.down.sql` e reaplica.
 O CI faz o mesmo em Postgres 17 a cada PR. Migration nova sem `.down.sql` reprova.
 
+## Avisos no celular (Web Push)
+
+A PMS avisa o admin quando um calendário traz uma reserva que bate com outra já na PMS
+(possível overbooking). Só quarto, canal e datas, sem dados de hóspede; cada conflito avisa uma vez.
+
+- Servidor: `VAPID_PUBLIC_KEY` e `VAPID_PRIVATE_KEY` no Render (gerar com `node scripts/gerar-chaves-vapid.js`).
+  Sem elas, os avisos ficam desligados.
+- iPhone (iOS 16.4+): abrir a PMS **pelo ícone da tela de início** → Alertas → 🔔 → "Ativar avisos".
+- O push vai vazio (sem conteúdo); o app busca o texto em `POST /push/inbox` usando o endereço
+  secreto do próprio aparelho. O service worker (`build/sw.js`) não guarda cache.
+
 ## Backup e restauração
 
 O Supabase Free não faz backup automático. Na PMS, **Alertas → 💾 Backup do banco → Baixar backup**
