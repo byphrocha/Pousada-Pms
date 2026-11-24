@@ -142,3 +142,11 @@ test("tela: conflito marcado com ⚠️ no nome (não só pela cor, que o Airbnb
   assert.equal((html.match(/⚠️ Hóspede Teste/g) || []).length, 2);
   assert.doesNotMatch(html, /⚠️ Hóspede Teste c/);
 });
+
+test("tela: barra de reserva sem nome mostra o canal, não 'Reserved'", () => {
+  const fe = loadFrontend({});
+  fe.run(`reservations = ${JSON.stringify([res("r1", "20", "2030-03-02", "2030-03-04", { source: "airbnb", guestName: "Reserved" })])}; calStart = "2030-03-01";`);
+  const html = fe.run("renderCalendario()");
+  assert.match(html, /Airbnb · sem nome/);
+  assert.doesNotMatch(html, />Reserved</);
+});

@@ -41,3 +41,21 @@ test("quartos 11 e 12 mostram a climatização real (antes era 'Vent.' fixo)", (
   const h = fe.run(`roomCardHtml({ id: "11", type: "Triplo", climate: "AC" }, "free", null, false)`);
   assert.match(h, /❄ AC/);
 });
+
+test("nome genérico do iCal vira canal + 'sem nome'; bloqueio do Airbnb identificado", () => {
+  const g = (r) => JSON.parse(fe.run(`JSON.stringify(guestDisplay(${JSON.stringify(r)}))`));
+  assert.deepEqual(g({ guestName: "Reserved", source: "airbnb" }), { text: "Airbnb · sem nome", generic: true });
+  assert.deepEqual(g({ guestName: "CLOSED - Not available", source: "booking" }), { text: "Booking · sem nome", generic: true });
+  assert.deepEqual(g({ guestName: "Airbnb (Not available)", source: "airbnb" }), { text: "Bloqueio Airbnb", generic: true });
+  assert.deepEqual(g({ guestName: "", source: "direto" }), { text: "Direto · sem nome", generic: true });
+  assert.deepEqual(g({ guestName: "Hóspede Teste", source: "booking" }), { text: "Hóspede Teste", generic: false });
+  const h = card("occupied", { ...res, guestName: "Reserved", source: "airbnb" });
+  assert.match(h, /rc-guest rc-empty">Airbnb · sem nome</);
+  assert.doesNotMatch(h, /Reserved/);
+  assert.match(card("occupied", { ...res, source: "booking" }), /sai 05\/03 · Booking/);
+});
+
+test("climatização não quebra no meio ('💨 Vent.' junto)", () => {
+  const h = fe.run(`roomCardHtml(ROOMS.find(r => r.id === "11"), "free", null, false)`);
+  assert.match(h, /<span class="nw">💨 Vent\.<\/span>/);
+});
