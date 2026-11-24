@@ -2375,12 +2375,13 @@ async function deletePreReserva(id) {
 let calUrlsState = "idle";
 let calUrls = null;
 let calUrlsError = null;
+let calChannels = null; // PMS-010 passo 2: { airbnb: {anúncio: url}, booking: {...} }
 async function loadCalUrls() {
   if (calUrlsState === "loading") return;
   calUrlsState = "loading";
   const r = await api("GET", "/calendar-urls");
   if (r && r.urls && typeof r.urls === "object") {
-    calUrls = r.urls; calUrlsError = null; calUrlsState = "ok";
+    calUrls = r.urls; calChannels = r.channels || null; calUrlsError = null; calUrlsState = "ok";
   } else {
     calUrls = null; calUrlsState = "error";
     if (r && r.code === "CALENDAR_TOKEN_MISSING") {
@@ -2406,44 +2407,51 @@ function renderCalUrls() {
   if (calUrlsState !== "ok" || !calUrls) {
     return `<div style="color:var(--mu);font-size:12px">Carregando URLs…</div>`;
   }
-  const rooms = [
-    ["CF",    "🏡 Casa Fechada — pousada toda"],
-    ["11+12", "🔗 Suíte 11+12 combinada"],
-    ["10","11","12","20","21","22","23","24","25"].map(r => [r, `Quarto ${r}`])
-  ].flat(1);
-  const roomLabels = {
-    "CF":"🏡 Casa Fechada","11+12":"🔗 Suíte 11+12",
-    "10":"Qto 10","11":"Qto 11","12":"Qto 12","20":"Qto 20","21":"Qto 21",
-    "22":"Qto 22","23":"Qto 23","24":"Qto 24","25":"Qto 25"
-  };
+  return calUrlRowsHtml(calChannels) + calGeneralUrlsHtml(calUrls);
+}
 
-  let s = `<div style="display:flex;flex-direction:column;gap:6px">`;
-  for (const [id] of rooms) {
-    const url = calUrls[id] || "";
-    if (!url) continue;
-    s += `<div style="display:flex;align-items:center;gap:8px">
-      <div style="width:58px;font-size:11px;font-weight:700;color:var(--bl);flex-shrink:0">
-        ${esc(roomLabels[id]||id)}
-      </div>
-      <input readonly value="${esc(url)}"
-        style="flex:1;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
-        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);
-        cursor:pointer" onclick="this.select()"
-        title="Clique para selecionar">
-      <button onclick="copyCalUrl('${esc(url)}')"
-        style="flex-shrink:0;font-size:10px;padding:5px 10px;border-radius:6px;
-        border:1px solid var(--bd);background:var(--bg3);color:var(--tx);
-        cursor:pointer;font-family:inherit">
-        Copiar
-      </button>
+// Links gerais (todas as origens) continuam existindo para não quebrar nada já
+// cadastrado (regra 3), mas ficam recolhidos: num anúncio de OTA eles devolvem
+// as reservas do próprio anúncio.
+function calGeneralUrlsHtml(urls) {
+  const order = ["CF", "11+12", "10", "11", "12", "20", "21", "22", "23", "24", "25"];
+  const rows = order.filter(id => urls[id]).map(id => `<div style="display:flex;align-items:center;gap:8px">
+      <div style="width:96px;font-size:12px;font-weight:700;color:var(--bl);flex-shrink:0">${esc(CAL_PRODUCT_LABEL[id] || "Qto " + id)}</div>
+      <input readonly value="${esc(urls[id])}" style="flex:1;min-width:0;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
+        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);cursor:pointer"
+        onclick="this.select()" title="Clique para selecionar">
+      <button class="btn" onclick="copyCalUrl('${esc(urls[id])}')">Copiar</button>
+    </div>`).join("");
+  if (!rows) return "";
+  return `<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:var(--dm)">Links gerais por quarto (todas as origens)</summary>
+    <div style="font-size:12px;color:var(--dm);margin:8px 0;line-height:1.6">Para uso fora das plataformas. Não cole estes links num anúncio do Booking ou do Airbnb: eles incluem as reservas do próprio anúncio.</div>
+    <div style="display:flex;flex-direction:column;gap:6px">${rows}</div></details>`;
+}
+
+// Uma linha por anúncio que existe em cada plataforma (Booking: 20, 22, 24;
+// Airbnb: os anúncios cadastrados em Sincronizar). Cada link já vem sem eco e
+// sem os bloqueios automáticos do Airbnb (lib/feed-export.js).
+const CAL_PRODUCT_LABEL = { CF: "🏡 Casa Fechada", "11+12": "🔗 Suíte 11+12" };
+function calUrlRowsHtml(channels) {
+  if (!channels) return `<div style="color:var(--mu);font-size:12px">Nenhum link disponível.</div>`;
+  const row = (id, url) => `<div style="display:flex;align-items:center;gap:8px">
+      <div style="width:96px;font-size:12px;font-weight:700;color:var(--bl);flex-shrink:0">${esc(CAL_PRODUCT_LABEL[id] || "Quarto " + id)}</div>
+      <input readonly value="${esc(url)}" style="flex:1;min-width:0;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
+        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);cursor:pointer"
+        onclick="this.select()" title="Clique para selecionar">
+      <button class="btn" onclick="copyCalUrl('${esc(url)}')">Copiar</button>
     </div>`;
+  let s = "";
+  for (const [ch, title] of [["booking", "Para colar no Booking"], ["airbnb", "Para colar no Airbnb"]]) {
+    const list = Object.entries(channels[ch] || {});
+    s += `<div style="font-size:13px;font-weight:700;margin:12px 0 8px">${title}</div>`;
+    s += list.length ? `<div style="display:flex;flex-direction:column;gap:6px">${list.map(([id, url]) => row(id, url)).join("")}</div>`
+                     : `<div style="color:var(--mu);font-size:12px">Nenhum anúncio desta plataforma cadastrado em Sincronizar.</div>`;
   }
-  s += `</div>
-  <div style="font-size:10px;color:var(--mu);margin-top:10px;line-height:1.6">
-    💡 <b style="color:var(--tx)">Como usar:</b>
-    Copie a URL do quarto correspondente e cole no campo de "iCal externo" ou
-    "Importar calendário" do Booking e do Airbnb. Eles vão bloquear automaticamente
-    as datas que já estão reservadas no PMS.
+  s += `<div style="font-size:12px;color:var(--dm);margin-top:12px;line-height:1.6">
+    Cada link fecha no anúncio as datas ocupadas por <b>outros</b> canais e pelas reservas diretas.
+    Ele não devolve as reservas do próprio anúncio nem os bloqueios automáticos do Airbnb.
+    <b>Não troque links já cadastrados nas plataformas sem o plano de transição (PMS-010).</b>
   </div>`;
   return s;
 }
