@@ -76,7 +76,8 @@ input,select,textarea{font-family:inherit}
 .rc-chip{font-size:11px;font-weight:700;color:var(--sc);background:color-mix(in srgb,var(--sc) 16%,transparent);border-radius:99px;padding:3px 8px;white-space:nowrap}
 .room-type{font-size:12px;color:var(--dm)}
 .rc-guest{font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rc-empty{color:var(--mu);font-weight:400}
+.rc-empty{color:var(--dm);font-weight:500}
+.nw{white-space:nowrap}
 .rc-out{font-size:11px;color:var(--mu);margin-top:-4px}
 .clean-btn{margin-top:auto;font-size:12px;padding:7px 8px;border-radius:9px;border:1px solid color-mix(in srgb,var(--sc) 50%,transparent);background:color-mix(in srgb,var(--sc) 14%,transparent);color:var(--sc);cursor:pointer;font-family:inherit;font-weight:700;width:100%}
 .clean-btn:hover{background:color-mix(in srgb,var(--sc) 24%,transparent)}
@@ -1117,7 +1118,7 @@ function renderCalendario() {
     const left = LBL + b.col * COL + (b.clipLeft ? 0 : 3);
     const w = b.span * COL - (b.clipLeft ? 0 : 3) - (b.clipRight ? 0 : 3);
     const icon = b.kind === "cf" ? "🏡 " : b.kind === "suite" ? "🔗 " : "";
-    const label = b.block ? "Bloqueio" : b.guestName;
+    const label = b.block ? "Bloqueio" : guestDisplay(b).text;
     const roomTxt = b.kind === "cf" ? "Casa Fechada" : b.kind === "suite" ? "Suíte 11+12" : "Quarto " + b.roomId;
     const tip = `${label} — ${roomTxt} — ${fmtDate(b.checkIn)} a ${fmtDate(b.checkOut)} (${nights(b.checkIn, b.checkOut)} noite(s))` +
       `${b.source ? " — " + b.source : ""}${b.pending ? " — pendente (não bloqueia)" : ""}${b.conflict ? " — CONFLITO" : ""}`;
@@ -1247,14 +1248,28 @@ function getCasaFechadaCheckout() {
 // Cartão de quarto: superfície neutra, faixa e etiqueta na cor do estado (o estado
 // vem escrito, não só pela cor), hóspede e data de saída. Um desenho só para
 // todos os quartos, inclusive 11 e 12 dentro da suíte.
+// Nome para exibir. O iCal do Airbnb/Booking não traz o nome do hóspede: chega
+// "Reserved", "CLOSED - Not available" etc. Mostra o canal em vez do texto do feed.
+// Só exibição: o dado no banco não muda.
+const SRC_LABEL = { direto: "Direto", booking: "Booking", airbnb: "Airbnb" };
+function guestDisplay(r) {
+  const n = String((r && r.guestName) || "").trim();
+  const src = SRC_LABEL[r && r.source] || "";
+  if (r && r.source === "airbnb" && CAL_BLOCK_RE.test(n)) return { text: "Bloqueio Airbnb", generic: true };
+  if (!n || GENERIC_NAMES.test(n)) return { text: src ? `${src} · sem nome` : "Sem nome", generic: true };
+  return { text: n, generic: false };
+}
+
 function roomCardHtml(room, st, res, cf) {
   const s = STATUS[st] || STATUS.free;
-  const out = res && res.checkOut ? `<div class="rc-out">sai ${esc(fmtDate(res.checkOut).slice(0, 5))}</div>` : "";
+  const g = res ? guestDisplay(res) : null;
+  const src = res && SRC_LABEL[res.source] ? ` · ${SRC_LABEL[res.source]}` : "";
+  const out = res && res.checkOut ? `<div class="rc-out">sai ${esc(fmtDate(res.checkOut).slice(0, 5))}${esc(src)}</div>` : "";
   return `<div class="room-card st-${esc(st)}" style="--sc:${s.color}" onclick="handleRoomClick('${esc(room.id)}')"
-    title="Quarto ${esc(room.id)} — ${esc(s.label)}${res ? " — " + esc(res.guestName) : ""}">
+    title="Quarto ${esc(room.id)} — ${esc(s.label)}${g ? " — " + esc(g.text) : ""}">
     <div class="rc-top"><span class="room-num">${esc(room.id)}</span><span class="rc-chip">${s.icon} ${esc(s.label)}</span></div>
-    <div class="room-type">${esc(room.type)} · ${room.climate === "AC" ? "❄ AC" : "💨 Vent."}</div>
-    ${res ? `<div class="rc-guest">${esc(res.guestName)}</div>${out}` : ""}
+    <div class="room-type">${esc(room.type)} · <span class="nw">${room.climate === "AC" ? "❄ AC" : "💨 Vent."}</span></div>
+    ${res ? `<div class="rc-guest${g.generic ? " rc-empty" : ""}">${esc(g.text)}</div>${out}` : ""}
     ${!cf && st === "checkin" ? `<button class="clean-btn rc-act" onclick="markCheckedIn('${esc(room.id)}',event)">✓ Check-in feito</button>` : ""}
     ${!cf && st === "cleaning" ? `<button class="clean-btn rc-act" onclick="markClean('${esc(room.id)}',event)">✓ Limpo</button>` : ""}
   </div>`;
@@ -1360,7 +1375,7 @@ function renderMap() {
         html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="handleRoomClick('${r.roomId}')">
           <span class="agenda-room" style="color:${clr}">${r.roomId}</span>
           <div>
-            <div style="color:var(--tx);font-size:13px;font-weight:600">${esc(r.guestName)}</div>
+            <div style="color:var(--tx);font-size:13px;font-weight:600">${esc(guestDisplay(r).text)}</div>
             <div style="color:var(--dm);font-size:12px">${r.adults} adulto(s)${r.children>0?` + ${r.children} criança(s)`:""}</div>
           </div>
         </div>`;
