@@ -78,6 +78,10 @@ input,select,textarea{font-family:inherit}
 .rc-guest{font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rc-empty{color:var(--dm);font-weight:500}
 .nw{white-space:nowrap}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--bg3);color:var(--tx);border:1px solid var(--bdh);border-radius:12px;padding:10px 16px;font-size:13px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9999}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:640px){#toast{bottom:84px}}
+@media(prefers-reduced-motion:reduce){#toast{transition:none}}
 .rc-out{font-size:11px;color:var(--mu);margin-top:-4px}
 .clean-btn{margin-top:auto;font-size:12px;padding:7px 8px;border-radius:9px;border:1px solid color-mix(in srgb,var(--sc) 50%,transparent);background:color-mix(in srgb,var(--sc) 14%,transparent);color:var(--sc);cursor:pointer;font-family:inherit;font-weight:700;width:100%}
 .clean-btn:hover{background:color-mix(in srgb,var(--sc) 24%,transparent)}
@@ -2808,11 +2812,199 @@ function openEditModal(id) {
   const withPayments = paymentsEnabled && authRole === "admin" && r.source === "direto";
   const withHistory = authRole === "admin";
   document.getElementById("modal-body").innerHTML = reservationForm(r, true) +
+    `<div id="wa-box" style="margin-top:14px"></div>` +
     (withPayments ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "") +
     (withHistory ? `<div id="hist-box" style="margin-top:14px;font-size:12px;color:var(--mu)"></div>` : "");
   document.getElementById("modal").style.display="flex";
   if (withPayments) loadPaymentsBox(id);
   if (withHistory) loadHistoryBox(id);
+}
+
+// Aviso curto que some sozinho (lido por leitor de tela).
+function showToast(msg) {
+  let el = document.getElementById("toast");
+  if (!el) {
+    el = document.createElement("div"); el.id = "toast"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+  }
+  el.textContent = msg; el.classList.add("show");
+  clearTimeout(showToast._t); showToast._t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+// ─── WhatsApp (PMS-021) ───────────────────────────────────────────────────────
+// Modelos com {nome}, {quarto}, {entrada}, {saida}, {noites}, {valor}, {saldo}.
+// A pessoa revisa o texto e só então abre o WhatsApp. Nada é enviado sozinho.
+let msgTemplates = null;      // cache da sessão (GET /message-templates)
+let msgTemplatesCustom = false;
+
+// Telefone para o link wa.me: só dígitos, com 55 quando faltar. "" se não der.
+function waPhone(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const d = s.replace(/\D/g, "");
+  if (s.startsWith("+")) return d.length >= 8 && d.length <= 15 ? d : "";
+  if (d.startsWith("55") && (d.length === 12 || d.length === 13)) return d;
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  return "";
+}
+function waLink(phone, text) {
+  const p = waPhone(phone);
+  return p ? `https://wa.me/${p}?text=${encodeURIComponent(text || "")}` : "";
+}
+
+function msgRoomLabel(r) {
+  const n = (r && r.notes) || "";
+  if (/\[Casa toda:/.test(n)) return "Casa Fechada (pousada toda)";
+  if (/\[Suíte grupo:/.test(n)) return "Suíte 11+12";
+  return "quarto " + ((r && r.roomId) || "");
+}
+
+// Contexto para preencher o modelo. Valores só para admin.
+function msgContext(r, extra = {}) {
+  const g = guestDisplay(r);
+  const first = g.generic ? "" : String(r.guestName || "").trim().split(/\s+/)[0];
+  const n = r.checkIn && r.checkOut ? nights(r.checkIn, r.checkOut) : "";
+  const ctx = {
+    nome: first, quarto: msgRoomLabel(r),
+    entrada: r.checkIn ? fmtDate(r.checkIn) : "", saida: r.checkOut ? fmtDate(r.checkOut) : "",
+    noites: n === "" ? "" : String(n),
+  };
+  if (authRole === "admin") {
+    if (Number(r.amount) > 0) ctx.valor = fmtMoney(r.amount);
+    if (extra.saldo !== undefined && extra.saldo !== null) ctx.saldo = fmtMoney(extra.saldo);
+  }
+  return ctx;
+}
+
+// Troca {campo} pelo valor. Sem nome, some a vírgula ("Olá, {nome}!" → "Olá!").
+// Campo sem valor fica como [campo] para a pessoa ver e completar.
+function fillTemplate(body, ctx) {
+  let t = String(body || "");
+  if (!ctx.nome) t = t.replace(/,\s*\{nome\}/g, "").replace(/\{nome\}\s*/g, "");
+  return t.replace(/\{(\w+)\}/g, (m, k) => (ctx[k] !== undefined && ctx[k] !== "" ? ctx[k] : `[${k}]`));
+}
+
+async function loadMsgTemplates(force) {
+  if (msgTemplates && !force) return msgTemplates;
+  const r = await api("GET", "/message-templates");
+  if (!r || !Array.isArray(r.templates)) throw new Error(apiErrorMessage(r) || "Não foi possível carregar os modelos.");
+  msgTemplates = r.templates; msgTemplatesCustom = !!r.custom;
+  return msgTemplates;
+}
+
+let waState = null; // { resId, saldo, sel }
+async function toggleWhatsApp(resId) {
+  const box = document.getElementById("wa-box");
+  if (!box) return;
+  if (box.dataset.open === "1") { box.dataset.open = ""; box.innerHTML = ""; return; }
+  box.dataset.open = "1";
+  box.innerHTML = `<div style="color:var(--mu);font-size:12px">Carregando modelos…</div>`;
+  const r = reservations.find(x => x.id === resId);
+  try {
+    await loadMsgTemplates();
+  } catch (e) {
+    box.innerHTML = `<div style="color:#f59e0b;font-size:12px">⚠️ ${esc(e.message)}</div>`;
+    return;
+  }
+  let saldo = null;
+  if (authRole === "admin" && paymentsEnabled && r && r.source === "direto") {
+    const p = await api("GET", `/reservations/${encodeURIComponent(resId)}/payments`);
+    if (p && p.summary) saldo = p.summary.balance;
+  }
+  waState = { resId, saldo, sel: msgTemplates[0] && msgTemplates[0].id };
+  renderWhatsAppBox();
+}
+
+function waPick(id) { if (waState) { waState.sel = id; renderWhatsAppBox(); } }
+
+function waBoxHtml(r, templates, selId, saldo, phoneNow) {
+  const tpl = (templates || []).find(t => t.id === selId) || (templates || [])[0];
+  const text = tpl ? fillTemplate(tpl.body, msgContext(r, { saldo })) : "";
+  const ok = !!waPhone(phoneNow);
+  return `
+    <div style="font-family:'Fraunces',serif;font-size:16px;font-weight:700;margin-bottom:10px">💬 Mensagem de WhatsApp</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${(templates || []).map(t => `<button class="tab-btn${tpl && t.id === tpl.id ? " active" : ""}" onclick="waPick('${esc(t.id)}')">${esc(t.title)}</button>`).join("")}
+    </div>
+    <div class="field" style="margin-bottom:8px"><label>Texto (revise antes de enviar)</label>
+      <textarea id="wa-text" rows="6" style="min-height:150px" oninput="waRefreshWarn()">${esc(text)}</textarea></div>
+    <div id="wa-warn" style="font-size:12px;color:#f59e0b;margin-bottom:8px">${/\[[^\]]+\]/.test(text) ? "⚠️ Ainda há trechos [entre colchetes] para completar." : ""}</div>
+    ${ok ? "" : `<div style="font-size:12px;color:#f59e0b;margin-bottom:8px">⚠️ Telefone ausente ou inválido. Corrija o campo Telefone (com DDD) ou copie o texto.</div>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      ${authRole === "admin" ? `<button class="btn" onclick="openTemplatesEditor()">✏️ Editar modelos</button>` : ""}
+      <button class="btn" onclick="waCopy()">Copiar texto</button>
+      <button class="btn btn-green" ${ok ? "" : "disabled"} onclick="waOpen()">Abrir no WhatsApp</button>
+    </div>`;
+}
+
+function renderWhatsAppBox() {
+  const box = document.getElementById("wa-box");
+  if (!box || !waState) return;
+  const r = reservations.find(x => x.id === waState.resId);
+  if (!r) { box.innerHTML = ""; return; }
+  const phoneEl = document.getElementById("f-phone");
+  box.innerHTML = waBoxHtml(r, msgTemplates, waState.sel, waState.saldo, phoneEl ? phoneEl.value : r.phone);
+}
+
+function waRefreshWarn() {
+  const t = (document.getElementById("wa-text") || {}).value || "";
+  const el = document.getElementById("wa-warn");
+  if (el) el.textContent = /\[[^\]]+\]/.test(t) ? "⚠️ Ainda há trechos [entre colchetes] para completar." : "";
+}
+function waOpen() {
+  const t = (document.getElementById("wa-text") || {}).value || "";
+  const phone = (document.getElementById("f-phone") || {}).value || "";
+  const url = waLink(phone, t);
+  if (url) window.open(url, "_blank", "noopener");
+}
+async function waCopy() {
+  const t = (document.getElementById("wa-text") || {}).value || "";
+  try { await navigator.clipboard.writeText(t); showToast("Texto copiado"); }
+  catch { showToast("Não foi possível copiar; selecione o texto e copie."); }
+}
+
+// Editor de modelos (admin). Valida no servidor; erro aparece na tela.
+async function openTemplatesEditor() {
+  try { await loadMsgTemplates(true); } catch (e) { showToast(e.message); return; }
+  document.getElementById("modal-title").innerHTML = `Modelos de mensagem <button onclick="closeModal()">×</button>`;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="font-size:12px;color:var(--dm);margin-bottom:12px;line-height:1.6">
+      Campos que o PMS preenche: {nome} {quarto} {entrada} {saida} {noites} {valor} {saldo}.
+      Modelos com {valor} ou {saldo} ficam só para administrador.
+      ${msgTemplatesCustom ? "" : "<br>Estes são os modelos iniciais: complete os trechos [entre colchetes] com os dados da pousada."}
+    </div>
+    <div id="tpl-list">${msgTemplates.map((t, i) => templateEditorRow(t, i)).join("")}</div>
+    <div id="tpl-err" style="color:#ef4444;font-size:12px;margin:8px 0"></div>
+    <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">
+      <button class="btn" onclick="addTemplateRow()">+ Novo modelo</button>
+      <button class="btn btn-green" onclick="saveTemplates()">Salvar modelos</button>
+    </div>`;
+  document.getElementById("modal").style.display = "flex";
+}
+function templateEditorRow(t, i) {
+  return `<div class="tpl-row" data-id="${esc(t.id || "")}" style="border:1px solid var(--bd);border-radius:12px;padding:10px;margin-bottom:10px">
+    <div class="field" style="margin-bottom:6px"><label>Título</label><input class="tpl-title" maxlength="60" value="${esc(t.title || "")}"></div>
+    <div class="field" style="margin-bottom:6px"><label>Texto</label><textarea class="tpl-body" rows="4" maxlength="2000">${esc(t.body || "")}</textarea></div>
+    <button class="btn btn-red" onclick="this.closest('.tpl-row').remove()">Remover</button>
+  </div>`;
+}
+function addTemplateRow() {
+  const list = document.getElementById("tpl-list");
+  if (list) list.insertAdjacentHTML("beforeend", templateEditorRow({ id: "", title: "", body: "" }));
+}
+async function saveTemplates() {
+  const rows = [...document.querySelectorAll("#tpl-list .tpl-row")];
+  const templates = rows.map(el => ({
+    id: el.dataset.id, title: el.querySelector(".tpl-title").value, body: el.querySelector(".tpl-body").value,
+  }));
+  const r = await api("PUT", "/message-templates", { templates });
+  if (!r || !Array.isArray(r.templates)) {
+    document.getElementById("tpl-err").textContent = apiErrorMessage(r) || "Não foi possível salvar os modelos.";
+    return;
+  }
+  msgTemplates = r.templates; msgTemplatesCustom = true;
+  showToast("Modelos salvos");
+  closeModal();
 }
 
 // ─── Histórico da reserva (PMS-014) ───────────────────────────────────────────
@@ -3043,6 +3235,7 @@ function reservationForm(r, isEdit) {
     <textarea id="f-notes">${esc(r.notes||"")}</textarea></div>
   ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
   <div style="display:flex;gap:10px;justify-content:flex-end">
+    ${isEdit?`<button class="btn" onclick="toggleWhatsApp('${esc(r.id)}')">💬 WhatsApp</button>`:""}
     ${isEdit?`<button class="btn btn-red" onclick="cancelReservation('${r.id}')">Cancelar Reserva</button>`:""}
     <button class="btn btn-green" onclick="submitForm(${isEdit?`'${r.id}'`:"null"})">
       ${isEdit?"Salvar Alterações":"Criar Reserva"}

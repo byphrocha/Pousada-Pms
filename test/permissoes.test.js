@@ -53,6 +53,8 @@ const ROTAS = [
   ["POST",   "/reservations/group",         "todos",  { rows: [] }],
   ["PUT",    "/reservations/r1",            "todos",  { notes: "obs" }],
   ["DELETE", "/reservations/r1",            "admin"],
+  ["GET",    "/message-templates",          "todos"],
+  ["PUT",    "/message-templates",          "admin",  { templates: [{ title: "Teste", body: "Olá" }] }],
   ["GET",    "/urls",                       "admin"],
   ["POST",   "/urls",                       "admin",  { airbnb: {}, booking: {} }],
   ["GET",    "/sync/status",                "todos"],
