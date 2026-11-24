@@ -410,7 +410,7 @@ function saveCheckedIn() { saveRoomStates(); }
 // Qual marcação de hoje pode ser desfeita neste quarto (PMS-013), ou null.
 function undoableMark(roomId) {
   const t = todayStr();
-  const active = r => r.roomId === roomId && r.status !== "cancelled";
+  const active = r => r.roomId === roomId && occupies(r); // mesma regra de getRoomStatus
   if (checkedInRooms.has(roomId) && reservations.some(r => active(r) && r.checkIn === t)) return "checkedIn";
   if (cleanedRooms.has(roomId) && reservations.some(r => active(r) && r.checkOut === t)) return "cleaned";
   return null;
@@ -1049,6 +1049,10 @@ function calendarLayout(list, start, days) {
     r.checkIn && r.checkOut && r.checkIn < r.checkOut && r.checkIn < end && r.checkOut > start);
 
   const tagOf = r => {
+    // Coluna de grupo (PMS-006) primeiro; reservas antigas: marcação nas notas.
+    const g = String(r.groupId || "");
+    if (g.startsWith("cf:")) return "[Casa toda:" + g + "]";
+    if (g.startsWith("suite:")) return "[Suíte grupo:" + g + "]";
     const n = r.notes || "";
     const cf = n.match(/\[Casa toda:[^\]]+\]/);
     if (cf) return cf[0];
@@ -1480,8 +1484,9 @@ function renderReservas() {
   // Agrupa suíte 11+12 em uma linha só (apenas reservas não-CF)
   list = groupSuiteReservations(list);
 
-  const todayCheckins  = reservations.filter(r=>r.checkIn===t  && r.status!=="cancelled").length;
-  const todayCheckouts = reservations.filter(r=>r.checkOut===t && r.status!=="cancelled").length;
+  // Mesma regra do Mapa: uma por estadia (CF e 11+12 contam uma vez); pendente não conta.
+  const todayCheckins  = oneStayPerGroup(reservations.filter(r=>occupies(r)&&r.checkIn===t)).length;
+  const todayCheckouts = oneStayPerGroup(reservations.filter(r=>occupies(r)&&r.checkOut===t)).length;
 
   let html=`
   <div class="filter-bar">
@@ -1570,10 +1575,9 @@ function isSuiteRes(r) {
 function groupCasaFechada(list) {
   const seen = new Set();
   return list.reduce((acc, r) => {
-    if (r.notes && r.notes.includes("[Casa toda:")) {
-      // Sempre agrupa por hóspede+datas — garante deduplicação
-      // independente de como a chave interna foi gerada por quarto
-      const key = `cf-${r.guestName}-${r.checkIn}-${r.checkOut}`;
+    if (isCasaFechadaRes(r)) {
+      // Pela coluna de grupo (PMS-006); sem ela, por hóspede+datas (reservas antigas)
+      const key = r.groupId ? `cf-g-${r.groupId}` : `cf-${r.guestName}-${r.checkIn}-${r.checkOut}`;
       if (seen.has(key)) return acc;
       seen.add(key);
       acc.push({ ...r, roomId: "CF", _isCFRow: true });
@@ -1603,7 +1607,7 @@ function groupSuiteReservations(list) {
       grouped.push(r); return;
     }
     // Se é Casa Fechada, não agrupa como suíte — já será deduplicado abaixo
-    if (r.notes && r.notes.includes("[Casa toda:")) {
+    if (isCasaFechadaRes(r)) {
       grouped.push(r); return;
     }
     // Quarto 11 ou 12 — verifica se existe par no mesmo período
@@ -2266,7 +2270,7 @@ function renderPreReservas() {
       // Checa conflito com reservas confirmadas
       const hasConflict = p.check_in && p.check_out && p.status !== "recusado" &&
         reservations.some(r =>
-          r.roomId === p.room_id && r.status !== "cancelled" &&
+          r.roomId === p.room_id && occupies(r) &&
           r.checkIn < p.check_out && r.checkOut > p.check_in
         );
       s += `<div style="background:var(--bg2);border:1.5px solid ${hasConflict?"#ef444466":st.color+"33"};
