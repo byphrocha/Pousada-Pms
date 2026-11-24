@@ -249,3 +249,27 @@ test("Financeiro sem filtro de mês: parcela a vencer continua fora da receita",
   const all = (await call("GET", "/transactions", ADMIN())).body;
   assert.deepEqual(all.filter(t => t.readonly).map(t => t.amount), [1000]);
 });
+
+// ── Receita antiga no caixa (decisão 23/11/2026: só avisar) ──────────────────
+test("rota: informa receita antiga do grupo (CF) para evitar contar duas vezes", async () => {
+  seed({ transactions: [
+    { id: "t1", type: "income", category: "reserva_direta", amount: 150.1, reservation_id: "cf3" },
+    { id: "t2", type: "income", category: "reserva_direta", amount: 219.9, reservation_id: "cf0" },
+    { id: "t3", type: "expense", category: "manutencao", amount: 50, reservation_id: "cf0" },
+    { id: "t4", type: "income", category: "outros", amount: 999, reservation_id: "air1" },
+  ] });
+  const g = await call("GET", "/reservations/cf5/payments", ADMIN());
+  assert.equal(g.status, 200);
+  assert.deepEqual(g.body.legacyIncome, { count: 2, total: 370 });
+  seed();
+  assert.deepEqual((await call("GET", "/reservations/cf5/payments", ADMIN())).body.legacyIncome, { count: 0, total: 0 });
+});
+
+test("tela: aviso de receita antiga aparece só quando existe; falha de leitura também avisa", () => {
+  const fe = loadFrontend({});
+  const box = (li) => fe.run(`renderPaymentsBox(${JSON.stringify({ label: "20", summary: P.summarize(370, [], TODAY), payments: [], legacyIncome: li })}, "r1")`);
+  assert.match(box({ count: 2, total: 370 }), /2 receitas lançadas[\s\S]*370,00[\s\S]*conta duas vezes/);
+  assert.match(box({ count: 1, total: 100 }), /1 receita lançada/);
+  assert.doesNotMatch(box({ count: 0, total: 0 }), /sistema antigo|Não foi possível conferir/);
+  assert.match(box(null), /Não foi possível conferir/);
+});
