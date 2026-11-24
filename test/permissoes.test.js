@@ -62,6 +62,7 @@ const ROTAS = [
   ["GET",    "/room-states",                "todos"],
   ["POST",   "/room-states",                "todos",  { cleaned: [], checkedIn: [] }],
   ["POST",   "/room-states/20/cleaned",     "todos",  { value: true }],
+  ["DELETE", "/room-states/20/cleaned",    "todos"],
   ["GET",    "/transactions",               "admin"],
   ["POST",   "/transactions",               "admin",  { type: "income", amount: 1, date: "2030-03-10" }],
   ["PUT",    "/transactions/t1",            "admin",  { amount: 2 }],

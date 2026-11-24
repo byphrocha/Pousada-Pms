@@ -78,6 +78,8 @@ input,select,textarea{font-family:inherit}
 .rc-guest{font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rc-empty{color:var(--dm);font-weight:500}
 .nw{white-space:nowrap}
+.rc-undo{margin-top:auto;align-self:flex-start;background:none;border:none;padding:4px 0;color:var(--mu);font-size:11px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.rc-undo:hover{color:var(--tx)}
 .group-note{font-size:13px;color:#f59e0b;background:#f59e0b14;border:1px solid #f59e0b55;border-radius:10px;padding:10px 12px;margin-bottom:14px;line-height:1.5}
 .rc-out{font-size:11px;color:var(--mu);margin-top:-4px}
 .clean-btn{margin-top:auto;font-size:12px;padding:7px 8px;border-radius:9px;border:1px solid color-mix(in srgb,var(--sc) 50%,transparent);background:color-mix(in srgb,var(--sc) 14%,transparent);color:var(--sc);cursor:pointer;font-family:inherit;font-weight:700;width:100%}
@@ -404,6 +406,32 @@ async function loadRoomStates() {
 // saveClean/saveCheckedIn agora salvam no servidor (sincroniza entre dispositivos)
 function saveClean()     { saveRoomStates(); }
 function saveCheckedIn() { saveRoomStates(); }
+
+// Qual marcação de hoje pode ser desfeita neste quarto (PMS-013), ou null.
+function undoableMark(roomId) {
+  const t = todayStr();
+  const active = r => r.roomId === roomId && r.status !== "cancelled";
+  if (checkedInRooms.has(roomId) && reservations.some(r => active(r) && r.checkIn === t)) return "checkedIn";
+  if (cleanedRooms.has(roomId) && reservations.some(r => active(r) && r.checkOut === t)) return "cleaned";
+  return null;
+}
+const UNDO_LABEL = { checkedIn: "check-in", cleaned: "limpeza" };
+
+// Desfaz uma marcação feita por engano. Pede confirmação; erro aparece na tela.
+async function unmarkRoomState(roomId, kind, event) {
+  if (event) event.stopPropagation();
+  if (!confirm(`Desfazer a marcação de ${UNDO_LABEL[kind]} do quarto ${roomId}?`)) return;
+  const res = await api("DELETE", `/room-states/${encodeURIComponent(roomId)}/${kind}`);
+  if (res && Array.isArray(res.cleaned) && Array.isArray(res.checkedIn)) {
+    cleanedRooms   = new Set(res.cleaned);
+    checkedInRooms = new Set(res.checkedIn);
+  } else {
+    alert("Não foi possível desfazer a marcação do quarto " + roomId + ": " +
+          (apiErrorMessage(res) || "verifique a conexão") + ".");
+    await loadRoomStates();
+  }
+  render();
+}
 
 // Marca um quarto no servidor (uma marcação por vez, somada às dos outros aparelhos).
 // Em caso de falha, avisa e recarrega o estado real, em vez de fingir que salvou.
@@ -1290,6 +1318,8 @@ function roomCardHtml(room, st, res, cf) {
     ${res ? `<div class="rc-guest${g.generic ? " rc-empty" : ""}">${esc(g.text)}</div>${out}` : ""}
     ${!cf && st === "checkin" ? `<button class="clean-btn rc-act" onclick="markCheckedIn('${esc(room.id)}',event)">✓ Check-in feito</button>` : ""}
     ${!cf && st === "cleaning" ? `<button class="clean-btn rc-act" onclick="markClean('${esc(room.id)}',event)">✓ Limpo</button>` : ""}
+    ${(() => { const k = !cf && undoableMark(room.id); return k
+      ? `<button class="rc-undo" onclick="unmarkRoomState('${esc(room.id)}','${k}',event)">↩ Desfazer ${UNDO_LABEL[k]}</button>` : ""; })()}
   </div>`;
 }
 
