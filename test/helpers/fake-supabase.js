@@ -7,7 +7,16 @@
 // tabelas de dados, não na de usuários (senão nenhum pedido autenticado passaria).
 // missingColumns: { tabela: ["coluna"] } simula banco ANTES de uma migration que
 // cria a coluna (o select/filtro/gravação com ela falha como no Postgres).
-function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, maxRows = 1000, missingColumns = {} } = {}) {
+// noOverlap: simula a constraint reservations_no_overlap (mesma regra da migration
+// 20261123_01): o comando inteiro é recusado com 23P01 e nada é gravado.
+const BLOCK_RE = /(not available|closed|blocked|bloqueado|indispon|unavailable)/i;
+const occupies = (r) => !["cancelled", "pending"].includes(r.status || "confirmed") && String(r.check_out) > "2026-11-24" &&
+  !(r.source === "airbnb" && BLOCK_RE.test(r.guest_name || ""));
+const clash = (a, b) => a !== b && String(a.room_id) === String(b.room_id) && occupies(a) && occupies(b) &&
+  a.check_in < b.check_out && b.check_in < a.check_out;
+const OVERLAP = { code: "23P01", message: 'conflicting key value violates exclusion constraint "reservations_no_overlap"' };
+
+function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, maxRows = 1000, missingColumns = {}, noOverlap = false } = {}) {
   const tables = {};
   if (!("users" in initial)) initial = { ...initial, users: require("./auth").TEST_USERS };
   for (const [t, rows] of Object.entries(initial)) tables[t] = rows.map(r => ({ ...r }));
@@ -70,11 +79,20 @@ function createFakeSupabase(initial = {}, { delayMs = 0, failSelect = false, max
         for (const r of list) {
           if (r.id !== undefined && rows().some(x => x.id === r.id)) return { data: null, error: { message: "duplicate key" } };
         }
+        if (noOverlap && table === "reservations") {
+          const after = [...rows(), ...list];
+          if (list.some(n => after.some(o => clash(n, o)))) return { data: null, error: OVERLAP };
+        }
         // Sem id (coluna identity, ex.: audit_log): numera e marca a hora, como o banco.
         list.forEach(r => rows().push({ ...(r.id === undefined ? { id: rows().length + 1, at: new Date().toISOString() } : {}), ...r }));
         data = list.map(r => ({ ...r }));
       } else if (state.op === "update") {
         data = [];
+        if (noOverlap && table === "reservations") {
+          const after = rows().map(r => (match(r) ? { ...r, ...state.payload } : r));
+          const changed = after.filter((r, i) => match(rows()[i]));
+          if (changed.some(n => after.some(o => clash(n, o)))) return { data: null, error: OVERLAP };
+        }
         for (const r of rows()) if (match(r)) { Object.assign(r, state.payload); data.push({ ...r }); }
       } else if (state.op === "upsert") {
         const list = Array.isArray(state.payload) ? state.payload : [state.payload];
