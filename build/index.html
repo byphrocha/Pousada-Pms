@@ -893,11 +893,12 @@ async function cancelReservation(id) {
 // ─── Room helpers ─────────────────────────────────────────────────────────────
 function getRoomStatus(roomId) {
   const t = todayStr();
+  // Pendente não ocupa (decisão de 23/11/2026): só reservas que ocupam contam.
   const hasCheckoutToday = reservations.some(r=>
-    r.roomId===roomId && r.status!=="cancelled" && r.checkOut===t
+    r.roomId===roomId && occupies(r) && r.checkOut===t
   );
   const hasCheckinToday = reservations.some(r=>
-    r.roomId===roomId && r.status!=="cancelled" && r.checkIn===t
+    r.roomId===roomId && occupies(r) && r.checkIn===t
   );
 
   // Se tem checkout hoje e ainda não limpou → roxo (limpeza obrigatória antes do próximo check-in)
@@ -911,7 +912,7 @@ function getRoomStatus(roomId) {
 
   // Ocupado (hóspede já dentro, sem movimento hoje)
   const isOccupied = reservations.some(r=>
-    r.roomId===roomId && r.status!=="cancelled" && r.checkIn<t && r.checkOut>t
+    r.roomId===roomId && occupies(r) && r.checkIn<t && r.checkOut>t
   );
   if (isOccupied) return "occupied";
 
@@ -921,7 +922,7 @@ function getRoomStatus(roomId) {
 function getRoomRes(roomId) {
   const t = todayStr();
   return reservations.find(r=>
-    r.roomId===roomId && r.status!=="cancelled" && r.checkIn<=t && r.checkOut>t
+    r.roomId===roomId && occupies(r) && r.checkIn<=t && r.checkOut>t
   );
 }
 
@@ -1285,31 +1286,25 @@ function renderRelatorios() {
 }
 
 // ─── MAP VIEW ─────────────────────────────────────────────────────────────────
-function getCasaFechadaToday() {
-  const t = todayStr();
-  // reserva de casa fechada ativa hoje (qualquer quarto com nota [Casa toda:])
-  return reservations.find(r =>
-    r.status !== "cancelled" &&
-    r.notes && r.notes.includes("[Casa toda:") &&
-    r.checkIn <= t && r.checkOut > t
-  ) || null;
+// Grupo da reserva (PMS-006: group_id; reservas antigas: marcação nas notas).
+const isCasaFechadaRes = r => String(r.groupId || "").startsWith("cf:") || /\[Casa toda:/.test(r.notes || "");
+// Uma entrada por estadia: CF e 11+12 viram uma linha só, com o nome do produto.
+function oneStayPerGroup(list) {
+  const seen = new Set(), out = [];
+  for (const r of list) {
+    const tag = r.groupId || ((r.notes || "").match(/\[(?:Casa toda|Suíte grupo):([^\]]+)\]/) || [])[1] ||
+      (isSuiteRes(r) ? `suite|${r.source}|${r.checkIn}|${r.checkOut}` : null);
+    const key = tag ? "g:" + tag : "r:" + r.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ res: r, label: isCasaFechadaRes(r) ? "CF" : isSuiteRes(r) ? "11+12" : r.roomId });
+  }
+  return out;
 }
-function getCasaFechadaCheckin() {
-  const t = todayStr();
-  return reservations.find(r =>
-    r.status !== "cancelled" &&
-    r.notes && r.notes.includes("[Casa toda:") &&
-    r.checkIn === t
-  ) || null;
-}
-function getCasaFechadaCheckout() {
-  const t = todayStr();
-  return reservations.find(r =>
-    r.status !== "cancelled" &&
-    r.notes && r.notes.includes("[Casa toda:") &&
-    r.checkOut === t
-  ) || null;
-}
+const cfToday = pred => reservations.find(r => occupies(r) && isCasaFechadaRes(r) && pred(r, todayStr())) || null;
+function getCasaFechadaToday()    { return cfToday((r, t) => r.checkIn <= t && r.checkOut > t); }
+function getCasaFechadaCheckin()  { return cfToday((r, t) => r.checkIn === t); }
+function getCasaFechadaCheckout() { return cfToday((r, t) => r.checkOut === t); }
 
 // Cartão de quarto: superfície neutra, faixa e etiqueta na cor do estado (o estado
 // vem escrito, não só pela cor), hóspede e data de saída. Um desenho só para
@@ -1350,15 +1345,15 @@ function renderMap() {
   const cfCheckout = getCasaFechadaCheckout();
 
   // Se há Casa Fechada, todos os quartos são contados como ocupados
+  // Quartos físicos ocupados (um quarto com duas linhas conta uma vez).
   const occupied = cfAtiva
     ? ROOMS.map(r => ({roomId: r.id}))  // virtual: todos ocupados
-    : reservations.filter(r=>r.status!=="cancelled"&&r.checkIn<=t&&r.checkOut>t);
+    : [...new Set(reservations.filter(r=>occupies(r)&&r.checkIn<=t&&r.checkOut>t).map(r=>r.roomId))].map(roomId=>({roomId}));
 
-  // Check-ins e check-outs: se CF, mostra 1 (a pousada toda)
-  const checkins  = cfCheckin  ? [{roomId:"CF"}]
-    : reservations.filter(r=>r.checkIn===t&&r.status!=="cancelled"&&!(r.notes&&r.notes.includes("[Casa toda:")));
-  const checkouts = cfCheckout ? [{roomId:"CF"}]
-    : reservations.filter(r=>r.checkOut===t&&r.status!=="cancelled"&&!(r.notes&&r.notes.includes("[Casa toda:")));
+  // Chegadas e saídas: uma por estadia (CF e 11+12 contam uma vez). Pendente fica à parte.
+  const checkins  = oneStayPerGroup(reservations.filter(r=>occupies(r)&&r.checkIn===t));
+  const checkouts = oneStayPerGroup(reservations.filter(r=>occupies(r)&&r.checkOut===t));
+  const toConfirm = oneStayPerGroup(reservations.filter(r=>r.status==="pending"&&r.checkIn===t));
   const cleaning  = cfAtiva ? [] : ROOMS.filter(r=>getRoomStatus(r.id)==="cleaning");
 
   // KPIs
@@ -1433,15 +1428,20 @@ function renderMap() {
   html+=`</div>`;
 
   // Hoje agenda
-  if (checkins.length||checkouts.length) {
+  if (checkins.length||checkouts.length||toConfirm.length) {
     html+=`<div class="agenda"><div class="section-title">Hoje</div>
     <div class="agenda-grid">`;
-    [["Chegadas (check-in)",checkins,"#3b82f6","#0f1e2b"],["Saídas (check-out)",checkouts,"#f59e0b","#2b1e0a"]].forEach(([lbl,list,clr,bg])=>{
+    const cols = [["Chegadas (check-in)",checkins,"#3b82f6","#0f1e2b"],["Saídas (check-out)",checkouts,"#f59e0b","#2b1e0a"]];
+    // Pendente não ocupa o quarto: aparece à parte até ser confirmada.
+    if (toConfirm.length) cols.push(["⏳ A confirmar (pendente)",toConfirm,"#94a3b8","transparent"]);
+    cols.forEach(([lbl,list,clr,bg])=>{
       html+=`<div><div class="agenda-lbl" style="color:${clr}">${lbl}</div>`;
       if (!list.length) { html+=`<div style="color:var(--mu);font-size:13px">Nenhuma hoje</div>`; }
-      list.forEach(r=>{
-        html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="handleRoomClick('${r.roomId}')">
-          <span class="agenda-room" style="color:${clr}">${r.roomId}</span>
+      list.forEach(({res:r,label})=>{
+        // Pendente: o quarto está livre, então o toque abre a própria reserva para confirmar.
+        const act = r.status==="pending" ? `openEditModal('${esc(r.id)}')` : `handleRoomClick('${esc(r.roomId)}')`;
+        html+=`<div class="agenda-row" style="background:${bg};border:1px solid ${clr}44" onclick="${act}">
+          <span class="agenda-room" style="color:${clr}">${esc(label)}</span>
           <div>
             <div style="color:var(--tx);font-size:13px;font-weight:600">${esc(guestDisplay(r).text)}</div>
             <div style="color:var(--dm);font-size:12px">${r.adults} adulto(s)${r.children>0?` + ${r.children} criança(s)`:""}</div>
@@ -1559,6 +1559,8 @@ function renderReservas() {
 
 function isSuiteRes(r) {
   if (r.roomId!=="11" && r.roomId!=="12") return false;
+  // 0) coluna de grupo (PMS-006)
+  if (String(r.groupId || "").startsWith("suite:")) return true;
   // 1) marcado explicitamente nas notas
   if (r.notes && (r.notes.includes("[Suíte grupo:") || r.notes.includes("Suíte 11+12"))) return true;
   return false;
