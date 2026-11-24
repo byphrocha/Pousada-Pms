@@ -114,3 +114,18 @@ test("tela: inventário mostra variante, quarto e plataforma", () => {
   assert.match(html, /com token[\s\S]*Casa Fechada[\s\S]*403/);
   assert.doesNotMatch(html, /<b>x<\/b>/);
 });
+
+test("tela: links por plataforma aparecem com o nome certo (nunca como 'antigo')", () => {
+  const { loadFrontend } = require("./helpers/frontend-harness");
+  const fe = loadFrontend({});
+  const ag = { Booking: { count: 3, firstAt: "2030-01-01T00:00:00Z", lastAt: "2030-01-02T10:00:00Z", lastStatus: 200 } };
+  fe.run(`feedInventory = [{ variant: "canal-booking", room: "20", agents: ${JSON.stringify(ag)} },
+                           { variant: "canal-airbnb", room: "CF", agents: ${JSON.stringify(ag)} },
+                           { variant: "<i>novo</i>", room: "21", agents: ${JSON.stringify(ag)} }];`);
+  const html = fe.run("renderFeedInventory()");
+  assert.match(html, /link do Booking<\/td>\s*<td>20/);
+  assert.match(html, /link do Airbnb<\/td>\s*<td>Casa Fechada/);
+  assert.doesNotMatch(html, /antigo/);
+  assert.doesNotMatch(html, /<i>novo/);
+  assert.match(html, /&lt;i&gt;novo/);
+});

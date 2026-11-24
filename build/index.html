@@ -2738,6 +2738,12 @@ async function loadFeedInventory() {
   feedInventory = d && Array.isArray(d.feeds) ? d.feeds : [];
   render();
 }
+// Nome de cada tipo de link no inventário. Desconhecido aparece como veio
+// (nunca como "antigo", que levaria a conclusão errada na troca de links).
+function feedVariantLabel(v) {
+  return { legado: "🔓 antigo (sem token)", token: "🔒 geral com token",
+           "canal-booking": "🔒 link do Booking", "canal-airbnb": "🔒 link do Airbnb" }[v] || String(v);
+}
 function renderFeedInventory() {
   const head = `<div style="margin-top:20px;font-size:13px;color:var(--mu);font-weight:700">Quem consulta os calendários do PMS</div>`;
   if (feedInventory === null)
@@ -2747,7 +2753,7 @@ function renderFeedInventory() {
   const rows = feedInventory
     .sort((a, b) => (a.variant + a.room).localeCompare(b.variant + b.room))
     .flatMap(f => Object.entries(f.agents || {}).map(([agent, a]) => `<tr>
-      <td>${f.variant === "token" ? "🔒 com token" : "🔓 antigo (sem token)"}</td>
+      <td>${esc(feedVariantLabel(f.variant))}</td>
       <td>${esc(f.room === "CF" ? "Casa Fechada" : f.room)}</td><td>${esc(agent)}</td>
       <td style="text-align:right">${Number(a.count) || 0}</td>
       <td>${esc(new Date(a.lastAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }))}</td>
