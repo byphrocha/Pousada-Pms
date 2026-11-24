@@ -470,14 +470,31 @@ async function api(method, path, body) {
   const opts = {method, headers:{"Content-Type":"application/json",
     ...(authToken ? {"Authorization":"Bearer "+authToken} : {})}};
   if (body) opts.body = JSON.stringify(body);
+  let r;
   try {
-    const r = await fetch(path, opts);
-    if (r.status === 401) { clearAuth(); showLoginScreen(); return {}; }
-    return r.json();
+    r = await fetch(path, opts);
   } catch(e) {
     console.error("api error:", e);
     return { _networkError: true, error: "Erro de conexão" };
   }
+  // Sessão expirada: volta ao login e NÃO conta como sucesso (antes devolvia {},
+  // que apiErrorMessage lia como "salvo").
+  if (r.status === 401) { clearAuth(); showLoginScreen(); return { error: "Sua sessão expirou. Entre de novo; nada foi salvo." }; }
+  // Resposta que não é JSON (ex.: página 502 do Render durante deploy). Antes o
+  // erro escapava do try (return sem await) e o clique simplesmente não fazia nada.
+  try { return await r.json(); }
+  catch(e) {
+    return { error: `O servidor respondeu de forma inesperada (HTTP ${r.status}). Nada foi salvo; tente de novo em instantes.` };
+  }
+}
+
+// Gravação que confere a resposta (PMS-012). Em erro: avisa o motivo e devolve
+// false, para quem chamou NÃO fechar o formulário nem fingir que salvou.
+async function apiWrite(method, path, body, what) {
+  const res = await api(method, path, body);
+  const err = apiErrorMessage(res);
+  if (err) { alert(`Não foi possível ${what}: ${err}`); return false; }
+  return true;
 }
 
 async function doLogin() {
@@ -1781,14 +1798,14 @@ async function saveGuest(id) {
     notes:   document.getElementById("g-notes")?.value.trim(),
   };
   if (!g.name) { alert("Nome é obrigatório"); return; }
-  await api("POST", "/guests", g);
+  if (!(await apiWrite("POST", "/guests", g, "salvar o hóspede"))) return;
   closeModal();
   await loadAll();
 }
 
 async function deleteGuest(id) {
   if (!confirm("Excluir este hóspede? As reservas não serão afetadas.")) return;
-  await api("DELETE", "/guests/"+id);
+  if (!(await apiWrite("DELETE", "/guests/"+id, null, "excluir o hóspede"))) return;
   closeModal();
   await loadAll();
 }
@@ -2046,16 +2063,16 @@ async function saveTransaction(id) {
   if (!t.date) { alert("Selecione a data"); return; }
   t.month = t.date.slice(0,7);
 
-  if (id) await api("PUT",  "/transactions/"+id, t);
-  else    await api("POST", "/transactions", t);
-
+  const ok = id ? await apiWrite("PUT",  "/transactions/"+id, t, "salvar o lançamento")
+               : await apiWrite("POST", "/transactions", t, "salvar o lançamento");
+  if (!ok) return;
   closeModal();
   await loadTransactions(finMonth);
 }
 
 async function deleteTransaction(id) {
   if (!confirm("Excluir este lançamento?")) return;
-  await api("DELETE", "/transactions/"+id);
+  if (!(await apiWrite("DELETE", "/transactions/"+id, null, "excluir o lançamento"))) return;
   closeModal();
   await loadTransactions(finMonth);
 }
@@ -2339,15 +2356,16 @@ async function savePreReserva(id) {
     status:    get("pr-status"),
   };
   if (!body.guestName) { alert("Informe ao menos o nome do hóspede."); return; }
-  if (id) await api("PUT",  "/prereservations/"+id, body);
-  else    await api("POST", "/prereservations", body);
+  const ok = id ? await apiWrite("PUT",  "/prereservations/"+id, body, "salvar a pré-reserva")
+               : await apiWrite("POST", "/prereservations", body, "salvar a pré-reserva");
+  if (!ok) return;
   closeModal();
   await loadAll();
 }
 
 async function deletePreReserva(id) {
   if (!confirm("Excluir esta pré-reserva?")) return;
-  await api("DELETE", "/prereservations/"+id);
+  if (!(await apiWrite("DELETE", "/prereservations/"+id, null, "excluir a pré-reserva"))) return;
   closeModal();
   await loadAll();
 }
