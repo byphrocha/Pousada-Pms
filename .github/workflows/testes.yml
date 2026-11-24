@@ -17,7 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]   # package.json: "node": ">=18"
+        # package.json: "node": ">=18". O Render escolhe a versão mais nova que
+        # atende (em 24/11/2026 produção rodava Node 26), então ela também é testada.
+        node: [18, 20, 22, 24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,3 +28,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Falha se houver dependência com vulnerabilidade alta ou crítica (só as de produção).
+      - run: npm audit --omit=dev --audit-level=high
