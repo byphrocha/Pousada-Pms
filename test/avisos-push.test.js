@@ -308,3 +308,38 @@ test("VAPID: chave privada que começa com byte zero (1 em 256) funciona, gerada
   assert.match(wp.vapidAuthorization(EP, { publicKey: pub, privateKey: curta, subject: "s" }), /^vapid t=/);
   for (let i = 0; i < 600; i++) { const k = wp.generateVapidKeys(); assert.equal(wp.fromB64u(k.privateKey).length, 32); }
 });
+
+// ── reserva cancelada pela sincronização ─────────────────────────────────────
+test("cancelada pela sincronização: aviso com canal, quarto e datas; bloqueio do Airbnb não avisa; grupo vira 1", () => {
+  assert.deepEqual(pa.cancelledMessages([{ id: "a", room_id: "20", source: "booking", guest_name: "CLOSED - Not available", check_in: "2026-11-25", check_out: "2026-11-26" }], "booking", "20"),
+    [{ title: "❌ Reserva saiu do calendário", body: "Booking quarto 20: 25/11 → 26/11 sumiu do calendário e foi cancelada na PMS. Confira na plataforma se foi cancelada mesmo; se ela voltar, a PMS reativa sozinha." }]);
+  assert.deepEqual(pa.cancelledMessages([{ id: "b", room_id: "22", source: "airbnb", guest_name: "Airbnb (Not available)", check_in: "2026-12-02", check_out: "2026-12-04" }], "airbnb", "22"), []);
+  const cf = ["10", "11", "20"].map(r => ({ id: "c" + r, room_id: r, source: "airbnb", guest_name: "Reserved", group_id: "cf:x", check_in: "2026-12-04", check_out: "2026-12-06" }));
+  const m = pa.cancelledMessages(cf, "airbnb", "CF");
+  assert.equal(m.length, 1);
+  assert.match(m[0].body, /^Airbnb Casa Fechada: 04\/12 → 06\/12/);
+  assert.doesNotMatch(JSON.stringify(pa.cancelledMessages([{ id: "d", room_id: "21", source: "airbnb", guest_name: "Hóspede Fictício", check_in: "2026-12-01", check_out: "2026-12-02" }], "airbnb", "21")), /Fictício/);
+});
+
+test("ponta a ponta: reserva some 2 leituras → cancelada e aviso no celular uma vez", withKeys(async () => {
+  const URL_B20 = "https://ical.booking.com/ficticio-20.ics";
+  const ev = (uid, ci, co) => ["BEGIN:VEVENT", `UID:${uid}`, `DTSTART;VALUE=DATE:${ci.replace(/-/g, "")}`, `DTEND;VALUE=DATE:${co.replace(/-/g, "")}`, "SUMMARY:CLOSED - Not available", "END:VEVENT"];
+  const cal = (...e) => ["BEGIN:VCALENDAR", ...e.flat(), "END:VCALENDAR"].join("\n");
+  seed({ settings: [{ key: "ical_urls", value: { airbnb: {}, booking: { "20": URL_B20 } } }] });
+  await call("POST", "/push/subscribe", ADMIN(), { endpoint: EP });
+  const sent = pushRecorder();
+  const prev = process.env.ICAL_RECONCILE; process.env.ICAL_RECONCILE = "apply";
+  try {
+    _resetIcalStateForTests();
+    await runSync({ fetcher: async () => cal(ev("R1", "2099-11-25", "2099-11-26"), ev("R2", "2099-12-01", "2099-12-02")) });
+    await runSync({ fetcher: async () => cal(ev("R2", "2099-12-01", "2099-12-02")) });
+    assert.equal(sent.length, 0, "uma leitura sem a reserva ainda não cancela nem avisa");
+    await runSync({ fetcher: async () => cal(ev("R2", "2099-12-01", "2099-12-02")) });
+    assert.equal(sent.length, 1);
+    const msgs = (await call("POST", "/push/inbox", null, { endpoint: EP })).body.messages;
+    assert.equal(msgs[0].title, "❌ Reserva saiu do calendário");
+    assert.match(msgs[0].body, /^Booking quarto 20: 25\/11 → 26\/11/);
+    await runSync({ fetcher: async () => cal(ev("R2", "2099-12-01", "2099-12-02")) });
+    assert.equal(sent.length, 1, "não repete");
+  } finally { if (prev === undefined) delete process.env.ICAL_RECONCILE; else process.env.ICAL_RECONCILE = prev; }
+}));
