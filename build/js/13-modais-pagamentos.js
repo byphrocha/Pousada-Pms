@@ -473,6 +473,17 @@ async function submitForm(id) {
     return;
   }
 
+  // Reserva de grupo (CF/11+12) trocada para outro quarto: a estadia inteira
+  // muda (realocação). O servidor mantém a linha do contrato e libera as outras.
+  const orig = id ? reservations.find(x => x.id === id) : null;
+  if (orig && orig.groupId && form.roomId !== orig.roomId) {
+    const label = String(orig.groupId).startsWith("cf:") ? "Casa Fechada" : "Suíte 11+12";
+    if (!confirm(`Mover a estadia da ${label} inteira para o quarto ${form.roomId}?\nOs outros quartos desta reserva ficam livres.`)) return;
+    const mv = await api("POST", `/reservations/${encodeURIComponent(id)}/move`, { roomId: form.roomId });
+    if (!mv || mv.error || !mv.ok) { alert("Não mudou de quarto: " + (apiErrorMessage(mv) || "erro") + ". Nada foi alterado."); return; }
+    id = mv.id; form.id = mv.id;
+  }
+
   // Auto-save hóspede apenas para reservas diretas (não iCal)
   if (form.source === "direto") {
     await autoSaveGuest(form.guestName, get("f-phone"), get("f-email"));
