@@ -295,3 +295,16 @@ test("ponta a ponta: calendário falhando há mais de 1 h vira aviso no celular 
   assert.equal((await call("POST", "/push/inbox", null, { endpoint: EP })).body.messages[0].title, "✅ Calendário voltou");
   assert.deepEqual(setting(db, "push_notified").keys, []);
 }));
+
+test("VAPID: chave privada que começa com byte zero (1 em 256) funciona, gerada ou já salva com 31 bytes", () => {
+  const crypto2 = require("crypto");
+  let ecdh;
+  do { ecdh = crypto2.createECDH("prime256v1"); ecdh.generateKeys(); } while (ecdh.getPrivateKey()[0] !== 0 && ecdh.getPrivateKey().length === 32);
+  const pub = wp.b64u(ecdh.getPublicKey());
+  const curta = wp.b64u(ecdh.getPrivateKey().subarray(ecdh.getPrivateKey().length - 31));
+  const cheia = wp.b64u(Buffer.concat([Buffer.alloc(1), ecdh.getPrivateKey().subarray(ecdh.getPrivateKey().length - 31)]));
+  assert.equal(wp.vapidKeysValid(pub, curta), true);
+  assert.equal(wp.vapidKeysValid(pub, cheia), true);
+  assert.match(wp.vapidAuthorization(EP, { publicKey: pub, privateKey: curta, subject: "s" }), /^vapid t=/);
+  for (let i = 0; i < 600; i++) { const k = wp.generateVapidKeys(); assert.equal(wp.fromB64u(k.privateKey).length, 32); }
+});
