@@ -191,14 +191,24 @@ test("sem a tabela payments (antes da migration): rotas respondem 503 e o Financ
 const FORM = { "f-roomId": "20", "f-guestName": "Hóspede Teste", "f-checkIn": "2030-03-10", "f-checkOut": "2030-03-12",
   "f-source": "direto", "f-adults": "2", "f-children": "0", "f-phone": "", "f-notes": "", "f-amount": "800", "f-payment": "pix", "f-email": "" };
 
-test("tela com pagamentos ativos: reserva nova NÃO lança receita e abre a reserva para registrar o sinal", async () => {
+test("tela com pagamentos ativos: reserva direta comum NÃO lança receita na tela e NÃO abre o sinal (pagamento automático no servidor, 25/11)", async () => {
   const fe = loadFrontend({ fields: FORM, routes: [
     { method: "POST", path: "/reservations", reply: ({ body }) => ({ status: 200, json: { ok: true, reservation: { ...body } } }) },
   ] });
   fe.run(`authRole = "admin"; reservations = []; transactions = []; paymentsEnabled = true;
           var __opened = null; openEditModal = (id) => { __opened = id; };`);
   await fe.run("submitForm(null)");
-  assert.equal(fe.calls.filter(c => c.method === "POST" && c.path === "/transactions").length, 0, "regra 6");
+  assert.equal(fe.calls.filter(c => c.method === "POST" && c.path === "/transactions").length, 0, "nada de lançamento pela tela");
+  assert.equal(fe.run("__opened"), null, "não abre a tela de sinal");
+});
+
+test("tela com pagamentos ativos: Casa Fechada direta nova abre a reserva para registrar o sinal", async () => {
+  const fe = loadFrontend({ fields: { ...FORM, "f-roomId": "CF" }, routes: [
+    { method: "POST", path: "/reservations/group", reply: ({ body }) => ({ status: 200, json: { ok: true, product: "CF", reservations: body.rows.map(r => ({ ...r, room_id: r.roomId })) } }) },
+  ] });
+  fe.run(`authRole = "admin"; reservations = []; transactions = []; paymentsEnabled = true;
+          var __opened = null; openEditModal = (id) => { __opened = id; };`);
+  await fe.run("submitForm(null)");
   assert.ok(fe.run("__opened"), "abre a reserva criada");
 });
 

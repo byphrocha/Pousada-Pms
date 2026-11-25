@@ -451,6 +451,7 @@ async function saveReservation(form) {
     const res = await api("PUT",`/reservations/${form.id}`, form);
     const err = apiErrorMessage(res);
     if (err) return { ok:false, error: err };
+    if (res && res.warning) alert(res.warning); // ex.: pagamento automático não registrado
     // Ajuste de valor em reserva direta: só ATUALIZA o lançamento já vinculado.
     // Não cria lançamento novo na edição (antes isso duplicava receita — F2).
     // Modo antigo (sem pagamentos): ajusta o lançamento vinculado. Com pagamentos
@@ -482,6 +483,7 @@ async function saveReservation(form) {
   const res = await api("POST","/reservations", {...form, id: form.id || genId()});
   const err = apiErrorMessage(res);
   if (err || !res.reservation) return { ok:false, error: err || "Erro ao salvar a reserva." };
+  if (res.warning) alert(res.warning);
   reservations.push(normalizeRes(res.reservation));
   return { ok:true, reservation: res.reservation };
 }
@@ -502,6 +504,7 @@ async function saveReservationGroup(rows) {
   const err = apiErrorMessage(res);
   if (err || !Array.isArray(res.reservations))
     return { ok:false, error: err || "Erro ao salvar a reserva. Nada foi salvo.", created: [] };
+  if (res.warning) alert(res.warning);
   res.reservations.forEach(r => reservations.push(normalizeRes(r)));
   return { ok:true, created: rows.map((r, i) => ({ id: ids[i], roomId: r.roomId })) };
 }

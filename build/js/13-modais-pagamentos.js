@@ -80,13 +80,19 @@ function openEditModal(id) {
   if (!r) return;
   document.getElementById("modal-title").innerHTML =
     `Editar Reserva <button onclick="closeModal()">×</button>`;
+  // Sinal/parcelas só na Casa Fechada direta. Nas demais reservas diretas o
+  // pagamento integral é registrado sozinho (decisão de 25/11): fica recolhido,
+  // só para conferir, corrigir ou estornar.
   const withPayments = paymentsEnabled && authRole === "admin" && r.source === "direto";
+  const autoPaid = withPayments && !isCasaFechadaRes(r);
   const withHistory = authRole === "admin";
   const grp = r.groupId ? groupLabelOf(r) : null;
   document.getElementById("modal-body").innerHTML =
     (grp ? `<div class="group-note">🔗 Esta reserva faz parte da ${esc(grp)}. Datas, nome, telefone, canal e status mudam em todos os quartos juntos.</div>` : "") +
     reservationForm(r, true) +
-    (withPayments ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "") +
+    (withPayments && autoPaid ? `<details style="margin-top:18px;border-top:1px solid var(--bd);padding-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--dm)">💳 Pagamento (registrado automaticamente)</summary>
+      <div id="pay-box" style="margin-top:10px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div></details>` : "") +
+    (withPayments && !autoPaid ? `<div id="pay-box" style="margin-top:18px;border-top:1px solid var(--bd);padding-top:14px;font-size:12px;color:var(--mu)">Carregando pagamentos…</div>` : "") +
     (withHistory ? `<div id="hist-box" style="margin-top:14px;font-size:12px;color:var(--mu)"></div>` : "");
   document.getElementById("modal").style.display="flex";
   if (withPayments) loadPaymentsBox(id);
@@ -513,9 +519,10 @@ async function submitForm(id) {
     return;
   }
 
-  // PMS-007 ativo: nada de receita automática. Valor contratado não é dinheiro
-  // recebido (regra 6); abre a reserva para registrar sinal/parcelas.
-  if (paymentsEnabled && form.source === "direto" && !id && authRole === "admin") {
+  // PMS-007 ativo: Casa Fechada direta abre a reserva para registrar sinal e
+  // parcelas. As demais reservas diretas já ganharam o pagamento integral
+  // automático no servidor (decisão de 25/11/2026).
+  if (paymentsEnabled && form.source === "direto" && !id && authRole === "admin" && form.roomId === "CF") {
     await loadAll();
     openEditModal(linkId);
     return;

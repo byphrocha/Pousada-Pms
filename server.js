@@ -618,7 +618,10 @@ app.post("/reservations", authMiddleware, async (req, res) => {
     return overlapResponse(res, [row.room_id], { checkIn: row.check_in, checkOut: row.check_out }, "POST /reservations");
   if (error) return res.status(500).json({ error: error.message });
   await audit(req, "reserva.criar", "reservation", row.id, row.id, auditLib.snapshot(row));
-  res.json({ ok: true, reservation: reservationForRole(req, data) });
+  // Reserva nova só ganha pagamento se for direta, confirmada e com valor
+  // (evita leituras extras em toda criação; o resto é decidido em syncAutoPayment).
+  const payWarn = row.source === "direto" && row.status === "confirmed" && row.amount > 0 ? await syncAutoPayment(req, row.id) : null;
+  res.json({ ok: true, reservation: reservationForRole(req, data), ...(payWarn ? { warning: AUTO_PAY_WARNING } : {}) });
 });
 
 // Normaliza o corpo de uma reserva nova para a linha do banco (POST simples e grupo).
@@ -713,7 +716,8 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
     { produto: product, quartos: rooms, ...auditLib.snapshot(rows[0], ["check_in", "check_out", "status", "source", "amount"]) });
   // Devolve na mesma ordem em que o cliente mandou (o 1º id recebe o lançamento financeiro).
   const byId = new Map((data || []).map(r => [String(r.id), r]));
-  res.json({ ok: true, product, reservations: rows.map(r => reservationForRole(req, byId.get(String(r.id)) || r)) });
+  const payWarn = product === "CF" ? null : await syncAutoPayment(req, rows[0].id);
+  res.json({ ok: true, product, ...(payWarn ? { warning: AUTO_PAY_WARNING } : {}), reservations: rows.map(r => reservationForRole(req, byId.get(String(r.id)) || r)) });
 });
 
 // ── Mudar de quarto (realocação) ─────────────────────────────────────────────
@@ -815,7 +819,8 @@ async function updateGroup(req, res, row, me, members, before, auditOn) {
       await audit(req, auditLib.reservationAction(changes), "reservation", req.params.id, req.params.id,
         { ...changes, quartos: [null, rooms.length] });
   }
-  res.json({ ok: true, group: { id: me.group_id, rooms } });
+  const payWarn = ("amount" in own || "status" in group || "source" in group) ? await syncAutoPayment(req, req.params.id) : null;
+  res.json({ ok: true, group: { id: me.group_id, rooms }, ...(payWarn ? { warning: AUTO_PAY_WARNING } : {}) });
 }
 
 app.put("/reservations/:id", authMiddleware, async (req, res) => {
@@ -908,7 +913,8 @@ app.put("/reservations/:id", authMiddleware, async (req, res) => {
     if (Object.keys(changes).length)
       await audit(req, auditLib.reservationAction(changes), "reservation", req.params.id, req.params.id, changes);
   }
-  res.json({ ok: true });
+  const payWarn = ("amount" in row || "status" in row || "source" in row) ? await syncAutoPayment(req, req.params.id) : null;
+  res.json({ ok: true, ...(payWarn ? { warning: AUTO_PAY_WARNING } : {}) });
 });
 
 app.delete("/reservations/:id", authMiddleware, adminOnly, async (req, res) => {
@@ -1681,6 +1687,62 @@ async function resolveContract(reservationId) {
   const group = (rows || []).filter(x => payments.groupTag(x.notes) === tag);
   return { lead: payments.pickLead(group.length ? group : [r]), group: group.length ? group : [r] };
 }
+// ── Pagamento automático (decisão do Paulo, 25/11/2026) ──────────────────────
+// Reserva direta que NÃO é Casa Fechada: considera-se paga. Ao salvar com valor,
+// a PMS registra um pagamento integral ("pagamento", autor "automático") na data
+// do registro; ele aparece no Financeiro e nos relatórios e pode ser estornado.
+// Mudar o valor ajusta esse pagamento; valor zero ou pré-reserva o remove;
+// cancelar mantém (pode ter havido recebimento: estorno é decisão do Paulo).
+// Se alguém registrou pagamento à mão, a PMS não mexe em nada.
+// Casa Fechada direta continua com sinal/parcelas registrados à mão.
+const AUTO_PAY_BY = "automático";
+const AUTO_PAY_NOTE = "Pagamento integral registrado automaticamente (reserva direta)";
+async function syncAutoPayment(req, reservationId) {
+  try {
+    if (!(await paymentsEnabled())) return null;
+    const c = await resolveContract(reservationId);
+    if (c.error || c.notFound) return "erro";
+    const lead = c.lead;
+    const { data: extra, error: xErr } = await supabase.from("reservations").select("group_id, payment").eq("id", lead.id).maybeSingle();
+    if (xErr) return "erro";
+    const isCF = c.group.length >= 9 || String((extra && extra.group_id) || "").startsWith("cf:") || /\[Casa toda:/.test(String(lead.notes || ""));
+    if (lead.source !== "direto" || isCF) return null;
+    const { data: pays, error } = await supabase.from("payments").select("id, amount, created_by").eq("reservation_id", lead.id);
+    if (error) return "erro";
+    const list = pays || [];
+    if (list.some(p => p.created_by !== AUTO_PAY_BY)) return null;
+    const auto = list[0] || null;
+    const amount = Math.round((Number(lead.amount) || 0) * 100) / 100;
+    if (!(lead.status === "confirmed" && amount > 0)) {
+      if (auto && lead.status !== "cancelled") {
+        const { error: dErr } = await supabase.from("payments").delete().eq("id", auto.id);
+        if (dErr) return "erro";
+        await audit(req, "pagamento.excluir", "payment", auto.id, lead.id, { automatico: true, amount: [Number(auto.amount), null] });
+      }
+      return null;
+    }
+    if (auto) {
+      if (Number(auto.amount) === amount) return null;
+      const { error: uErr } = await supabase.from("payments").update({ amount }).eq("id", auto.id);
+      if (uErr) return "erro";
+      await audit(req, "pagamento.editar", "payment", auto.id, lead.id, { automatico: true, amount: [Number(auto.amount), amount] });
+      return null;
+    }
+    const method = payments.METHODS.includes(extra && extra.payment) ? extra.payment : "pix";
+    const v = payments.validatePayment({ kind: "pagamento", amount, method, paidAt: todayBrasilia(), notes: AUTO_PAY_NOTE }, todayBrasilia());
+    if (v.error) return "erro";
+    const row = { id: genId(), reservation_id: lead.id, ...v.value, created_by: AUTO_PAY_BY };
+    const { error: iErr } = await supabase.from("payments").insert(row);
+    if (iErr) return "erro";
+    await audit(req, "pagamento.registrar", "payment", row.id, lead.id, { automatico: true, ...auditLib.snapshot(v.value, auditLib.PAYMENT_FIELDS) });
+    return null;
+  } catch (e) {
+    console.error(`[payments] pagamento automático: ${e.message}`);
+    return "erro";
+  }
+}
+const AUTO_PAY_WARNING = "A reserva foi salva, mas o pagamento automático não foi registrado. Abra a reserva e confira o pagamento.";
+
 const groupLabel = (group, lead) => (group.length >= 9 ? "Casa Fechada" : group.length === 2 ? "11+12" : String(lead.room_id));
 
 // Histórico da reserva (e do grupo CF/11+12 e dos pagamentos), só admin.
