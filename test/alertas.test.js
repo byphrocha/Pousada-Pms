@@ -44,7 +44,7 @@ test("sininho e tela usam a mesma conta; pré-reserva passada não alerta", () =
       R("c", "21", "2099-01-01", "2099-01-03"), R("d", "21", "2099-01-02", "2099-01-04")])};
     prereservations = [{ room_id: "20", check_in: "2000-01-01", check_out: "2000-01-02", status: "aguardando" }];`);
   assert.equal(fe.run("findOverbookings().length"), 1);
-  const src = require("fs").readFileSync(require("path").join(__dirname, "../build/index.html"), "utf8");
+  const src = require("./helpers/frontend-source").fullPage();
   assert.match(src, /const alertCount = findOverbookings\(\)\.length;/, "sininho usa a mesma conta da tela");
   const html = fe.run("renderAlertas()");
   assert.doesNotMatch(html, /Nenhum conflito detectado/);
