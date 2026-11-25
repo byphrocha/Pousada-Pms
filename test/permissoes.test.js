@@ -52,6 +52,7 @@ const ROTAS = [
   ["POST",   "/reservations",               "todos",  { guestName: "Teste", roomId: "21", checkIn: "2030-05-01", checkOut: "2030-05-02" }],
   ["POST",   "/reservations/group",         "todos",  { rows: [] }],
   ["PUT",    "/reservations/r1",            "todos",  { notes: "obs" }],
+  ["POST",   "/reservations/r1/move",       "todos",  { roomId: "23" }],
   ["DELETE", "/reservations/r1",            "admin"],
   ["GET",    "/urls",                       "admin"],
   ["GET",    "/admin/backup",               "admin"],
@@ -100,6 +101,7 @@ const DECLARADA = (p) => p
   .replace(/\/g1$/, "/:id").replace(/\/r1$/, "/:id").replace(/\/t1$/, "/:id").replace(/\/p1$/, "/:id").replace(/\/x1$/, "/:id")
   .replace("/reservations/r1/payments", "/reservations/:id/payments")
   .replace("/reservations/r1/history", "/reservations/:id/history")
+  .replace("/reservations/r1/move", "/reservations/:id/move")
   .replace(/\?.*$/, "")
   .replace("/room-states/20/cleaned", "/room-states/:roomId/:kind")
   .replace("/calendar/TOKEN/booking/20.ics", "/calendar/:token/:channel/:roomId.ics")

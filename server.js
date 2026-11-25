@@ -716,11 +716,69 @@ app.post("/reservations/group", authMiddleware, async (req, res) => {
   res.json({ ok: true, product, reservations: rows.map(r => reservationForRole(req, byId.get(String(r.id)) || r)) });
 });
 
+// ── Mudar de quarto (realocação) ─────────────────────────────────────────────
+// Reserva comum: troca o quarto. Reserva de grupo (CF/11+12): a estadia inteira
+// vai para UM quarto. Fica a linha do contrato (maior valor: onde estão valor e
+// pagamentos), que sai do grupo; as outras são canceladas e os quartos ficam
+// livres. O banco confere o quarto de destino (409 ROOM_CONFLICT). Se cancelar
+// as outras falhar, a mudança é desfeita.
+app.post("/reservations/:id/move", authMiddleware, async (req, res) => {
+  const target = String((req.body || {}).roomId || "");
+  if (!feedExport.ALL_ROOMS.includes(target)) return res.status(400).json({ error: "Escolha um quarto (10 a 25)." });
+  const { data: me, error: meErr } = await supabase.from("reservations")
+    .select("id, room_id, group_id, status, check_in, check_out, amount").eq("id", req.params.id).maybeSingle();
+  if (meErr) return res.status(500).json({ error: "Não foi possível ler a reserva" });
+  if (!me) return res.status(404).json({ error: "Reserva não encontrada" });
+  if (me.status === "cancelled") return res.status(400).json({ error: "Reserva cancelada não muda de quarto." });
+  let members = [me];
+  if (me.group_id) {
+    const { data, error } = await supabase.from("reservations")
+      .select("id, room_id, group_id, status, check_in, check_out, amount").eq("group_id", me.group_id).neq("status", "cancelled");
+    if (error) return res.status(500).json({ error: "Não foi possível ler o grupo da reserva" });
+    members = data && data.length ? data : [me];
+  }
+  const fromRooms = members.map(m => String(m.room_id));
+  if (members.length === 1 && String(me.room_id) === target) return res.status(400).json({ error: "A reserva já está nesse quarto." });
+  // Linha que fica: a do contrato (maior valor); empate → a que foi aberta.
+  const keep = members.reduce((a, m) => (Number(m.amount) || 0) > (Number(a.amount) || 0) ? m : a,
+    members.find(m => String(m.id) === String(me.id)) || members[0]);
+  const others = members.filter(m => String(m.id) !== String(keep.id)).map(m => String(m.id));
+  // 1º libera as outras linhas (são a mesma estadia: liberar não colide com nada);
+  // 2º move a linha que fica. Se mover falhar, as outras voltam como estavam.
+  if (others.length) {
+    const { error: cErr } = await supabase.from("reservations").update({ status: "cancelled" }).in("id", others).neq("status", "cancelled");
+    if (cErr) {
+      console.error(`[move] falha ao liberar ${others.join(",")}: ${cErr.code || cErr.message}`);
+      return res.status(500).json({ error: "Não foi possível mudar de quarto. Nada foi alterado." });
+    }
+  }
+  const { error: mvErr } = await supabase.from("reservations").update({ room_id: target, group_id: null }).eq("id", keep.id);
+  if (mvErr) {
+    let undoErr = null;
+    for (const m of members.filter(x => others.includes(String(x.id)))) {
+      const { error } = await supabase.from("reservations").update({ status: m.status }).eq("id", m.id);
+      undoErr = undoErr || error;
+    }
+    if (undoErr) {
+      console.error(`[move] falha ao desfazer a liberação de ${others.join(",")}: ${undoErr.code || undoErr.message}`);
+      return res.status(500).json({ error: "Não foi possível mudar de quarto, e os quartos antigos ficaram liberados. Confira a reserva." });
+    }
+    if (isOverlapError(mvErr))
+      return overlapResponse(res, [target], { checkIn: String(keep.check_in).slice(0, 10), checkOut: String(keep.check_out).slice(0, 10), ignoreIds: [String(keep.id)] }, "POST /reservations/:id/move");
+    return res.status(500).json({ error: "Não foi possível mudar de quarto. Nada foi alterado." });
+  }
+  const changes = { room_id: [String(keep.room_id), target], liberados: fromRooms.filter(r => r !== target) };
+  await audit(req, "reserva.mudar_quarto", "reservation", keep.id, keep.id, changes);
+  // Também nas linhas canceladas: a sincronização não as reativa (não foi ela que cancelou).
+  for (const id of others) await audit(req, "reserva.mudar_quarto", "reservation", id, keep.id, { status: ["confirmed", "cancelled"], para: target });
+  res.json({ ok: true, id: keep.id, roomId: target, freed: changes.liberados });
+});
+
 // Edição de uma linha que faz parte de um grupo (PMS-006).
 async function updateGroup(req, res, row, me, members, before, auditOn) {
   const label = String(me.group_id).startsWith("cf:") ? "Casa Fechada" : "suíte 11+12";
   if ("room_id" in row && row.room_id !== String(me.room_id))
-    return res.status(400).json({ error: `Esta reserva faz parte da ${label}: não dá para trocar o quarto de uma linha só. Cancele e crie de novo.` });
+    return res.status(400).json({ error: `Esta reserva faz parte da ${label}: para trocar de quarto, escolha o quarto novo na edição e confirme: a estadia inteira muda junto.` });
   delete row.room_id;
   const { group, own } = groups.splitGroupUpdate(row);
   const ids = members.map(m => String(m.id));
@@ -1080,11 +1138,17 @@ async function runSync({ fetcher = fetchUrl } = {}) {
 
         // ── RECONCILIAÇÃO: datas alteradas e reservas que sumiram do feed ───
         if (mode !== "off") {
-          const { data: rows, error: rowsErr } = await selectAllPages(() => supabase.from("reservations")
-            .select("id, room_id, external_uid, check_in, check_out, notes, guest_name, source, group_id")
-            .eq("source", source).eq("status", "confirmed")
-            .in("room_id", targetRooms).gte("check_out", today).order("id"));
-          if (rowsErr) throw new Error("falha ao ler reservas para reconciliar");
+          // Pelo identificador de origem (source-quarto-uid), em qualquer quarto
+          // atual: reserva realocada para outro quarto continua acompanhada.
+          let rows = [];
+          for (const tr of targetRooms) {
+            const { data: part, error: rowsErr } = await selectAllPages(() => supabase.from("reservations")
+              .select("id, room_id, external_uid, check_in, check_out, notes, guest_name, source, group_id")
+              .eq("source", source).eq("status", "confirmed")
+              .like("external_uid", `${source}-${tr}-%`).gte("check_out", today).order("id"));
+            if (rowsErr) throw new Error("falha ao ler reservas para reconciliar");
+            rows = rows.concat(part || []);
+          }
           const plan = icalReconcile.planReconcile({
             source, feedRoomId: roomId, events: evts, rows, today, missingCounts: icalMissingCounts,
           });
