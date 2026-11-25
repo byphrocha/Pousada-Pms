@@ -938,6 +938,9 @@ function icalReconcileMode() {
 // Ausências seguidas de cada linha no feed (em memória; reinício do servidor zera,
 // o que só atrasa um cancelamento, nunca antecipa).
 const icalMissingCounts = new Map();
+// Autor das ações automáticas da sincronização na auditoria.
+const SYNC_ACTOR = { user: { userId: null, username: "sincronização", role: "sistema" } };
+const ICAL_CANCEL_ACTION = "ical.cancelar";
 
 async function runSync({ fetcher = fetchUrl } = {}) {
   if (isSyncing) return { log: ["⚠️ Sincronização já em andamento, aguarde."], added: 0 };
@@ -992,11 +995,14 @@ async function runSync({ fetcher = fetchUrl } = {}) {
         const label = targetRooms.length > 1 ? roomId : null;
         let seen; // primeira vista dos eventos recusados (carrega só se precisar)
         for (const ev of evts) {
-          const missing = [];
+          const missing = [], revive = [];
           for (const targetRoom of targetRooms) {
             const roomUid = icalReconcile.rowKey(source, targetRoom, ev.uid);
-            const { data: exists } = await supabase.from("reservations").select("id").eq("external_uid", roomUid).maybeSingle();
-            if (exists) continue;
+            const { data: exists } = await supabase.from("reservations").select("id, status, check_out").eq("external_uid", roomUid).maybeSingle();
+            if (exists) {
+              if (exists.status === "cancelled" && String(exists.check_out) >= today) revive.push(exists.id);
+              continue;
+            }
             const importGroup = groupsOn ? groups.groupIdForImport(source, roomId, ev.uid) : null;
             missing.push({
               ...(importGroup ? { group_id: importGroup } : {}),
@@ -1010,6 +1016,20 @@ async function runSync({ fetcher = fetchUrl } = {}) {
                    : "Importado via iCal",
               created_at: new Date().toISOString(),
             });
+          }
+          // Reapareceu no calendário depois de a sincronização cancelar (a
+          // plataforma às vezes some com uma reserva por algumas leituras).
+          // Só reativa o que a SINCRONIZAÇÃO cancelou: cancelamento feito por
+          // pessoa, ou sem registro na auditoria, fica como está (só avisa).
+          if (revive.length) {
+            const r = await reviveIfSyncCancelled(revive, ev, label);
+            if (r.revived) { updated += r.revived; log.push(`   ↺ Reapareceu e foi reativada: ${label || "Qto " + targetRooms.join(",")} (${ev.checkIn} → ${ev.checkOut})`); }
+            else if (r.conflict) {
+              failed++;
+              feed.conflicts.push({ room: label || targetRooms[0], checkIn: ev.checkIn, checkOut: ev.checkOut });
+              log.push(`   ⚠️ Reapareceu, mas as datas já estão ocupadas: ${ev.checkIn} → ${ev.checkOut}`);
+            } else if (r.error) { failed++; }
+            else log.push(`   ℹ️ Reserva cancelada na PMS continua no calendário da plataforma (${ev.checkIn} → ${ev.checkOut}); não reativada`);
           }
           if (!missing.length) continue;
           const rooms = missing.map(m => m.room_id).join(",");
@@ -1107,7 +1127,12 @@ async function runSync({ fetcher = fetchUrl } = {}) {
                 const { error } = await supabase.from("reservations")
                   .update({ status: "cancelled" }).eq("id", c.id).eq("status", "confirmed");
                 if (error) { failed++; console.error(`[ical-reconcile] falha ao cancelar ${c.id}: ${error.code || error.message}`); }
-                else { cancelled++; icalMissingCounts.delete(c.id); log.push(`   ✕ Saiu do calendário: Qto ${c.room_id} (${c.id})`); }
+                else {
+                  cancelled++; icalMissingCounts.delete(c.id); log.push(`   ✕ Saiu do calendário: Qto ${c.room_id} (${c.id})`);
+                  // Marca que foi a sincronização (não uma pessoa) que cancelou:
+                  // só assim a reserva pode ser reativada se reaparecer.
+                  await audit(SYNC_ACTOR, ICAL_CANCEL_ACTION, "reservation", c.id, c.id, { motivo: "sumiu do calendário", origem: `${source}/${roomId}` });
+                }
               }
             } else if (plan.updates.length || plan.cancels.length) {
               log.push(`   ℹ️ Modo relatório: ${plan.updates.length} alteração(ões) de data e ${plan.cancels.length} cancelamento(s) seriam aplicados`);
@@ -1921,6 +1946,31 @@ app.get("/calendar/:token/:roomId.ics", trackFeed("token"), async (req, res) => 
 
 // PMS-010 passo 2: calendário por canal, para o Airbnb e o Booking importarem.
 // /calendar/<token>/<airbnb|booking>/<quarto|CF|11+12>.ics — regras em lib/feed-export.js.
+// Reativa (num único UPDATE: CF/11+12 tudo ou nada) as linhas canceladas de um
+// evento que reapareceu, se a última ação de CADA uma na auditoria for o
+// cancelamento automático da sincronização. Datas voltam às do calendário.
+async function reviveIfSyncCancelled(ids, ev, label) {
+  const { data: logs, error } = await supabase.from("audit_log").select("entity_id, action, at")
+    .eq("entity", "reservation").in("entity_id", ids).order("at", { ascending: false });
+  if (error) { console.error(`[ical] não foi possível ler a auditoria para reativar: ${error.code || error.message}`); return {}; }
+  const latest = new Map(); // id → última ação (pelo horário; não depende da ordem da resposta)
+  for (const l of logs || []) {
+    const cur = latest.get(l.entity_id);
+    if (!cur || String(l.at) > String(cur.at)) latest.set(l.entity_id, l);
+  }
+  if (!ids.every(id => latest.get(id) && latest.get(id).action === ICAL_CANCEL_ACTION)) return {};
+  const { data: upd, error: upErr } = await supabase.from("reservations")
+    .update({ status: "confirmed", check_in: ev.checkIn, check_out: ev.checkOut })
+    .in("id", ids).eq("status", "cancelled").select("id");
+  if (upErr) {
+    if (isOverlapError(upErr)) return { conflict: true };
+    console.error(`[ical] falha ao reativar ${ids.join(",")}: ${upErr.code || upErr.message}`);
+    return { error: true };
+  }
+  for (const id of ids) await audit(SYNC_ACTOR, "ical.reativar", "reservation", id, id, { motivo: "reapareceu no calendário", grupo: label || null });
+  return { revived: (upd || []).length };
+}
+
 // Uma chave por anúncio: leituras simultâneas de anúncios diferentes não se sobrescrevem.
 const exportRecordKey = (channel, product) => `feed_export:${channel}:${product}`;
 
