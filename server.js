@@ -1081,7 +1081,7 @@ async function runSync({ fetcher = fetchUrl } = {}) {
         // ── RECONCILIAÇÃO: datas alteradas e reservas que sumiram do feed ───
         if (mode !== "off") {
           const { data: rows, error: rowsErr } = await selectAllPages(() => supabase.from("reservations")
-            .select("id, room_id, external_uid, check_in, check_out, notes")
+            .select("id, room_id, external_uid, check_in, check_out, notes, guest_name, source, group_id")
             .eq("source", source).eq("status", "confirmed")
             .in("room_id", targetRooms).gte("check_out", today).order("id"));
           if (rowsErr) throw new Error("falha ao ler reservas para reconciliar");
@@ -1123,6 +1123,7 @@ async function runSync({ fetcher = fetchUrl } = {}) {
                   for (const u of list) log.push(`   ↻ Datas alteradas: Qto ${u.room_id} ${u.from.join(" → ")} ⇒ ${u.to.join(" → ")}`);
                 }
               }
+              const cancelledNow = [];
               for (const c of plan.cancels) {
                 const { error } = await supabase.from("reservations")
                   .update({ status: "cancelled" }).eq("id", c.id).eq("status", "confirmed");
@@ -1132,8 +1133,14 @@ async function runSync({ fetcher = fetchUrl } = {}) {
                   // Marca que foi a sincronização (não uma pessoa) que cancelou:
                   // só assim a reserva pode ser reativada se reaparecer.
                   await audit(SYNC_ACTOR, ICAL_CANCEL_ACTION, "reservation", c.id, c.id, { motivo: "sumiu do calendário", origem: `${source}/${roomId}` });
+                  const row = (rows || []).find(r => r.id === c.id);
+                  if (row) cancelledNow.push(row);
                 }
               }
+              // Avisa no celular: uma reserva sumir do calendário pode ser
+              // cancelamento de verdade ou falha passageira da plataforma (caso
+              // do quarto 20 em 25/11). Bloqueio automático do Airbnb não avisa.
+              for (const m of pushAlerts.cancelledMessages(cancelledNow, source, roomId)) await pushToAll(m);
             } else if (plan.updates.length || plan.cancels.length) {
               log.push(`   ℹ️ Modo relatório: ${plan.updates.length} alteração(ões) de data e ${plan.cancels.length} cancelamento(s) seriam aplicados`);
             }
