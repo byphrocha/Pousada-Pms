@@ -23,9 +23,8 @@ function anything() {
 }
 
 function loadFrontend({ fields = {}, routes = [], keep = [] } = {}) {
-  const html = fs.readFileSync(path.join(__dirname, "../../build/index.html"), "utf8");
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-  if (scripts.length === 0) throw new Error("Nenhum <script> inline encontrado");
+  const scripts = require("./frontend-source").scripts();
+  if (scripts.length === 0) throw new Error("Nenhum <script> encontrado em build/index.html");
 
   const calls = [];   // { method, path, body }
   const alerts = [];
@@ -77,7 +76,9 @@ function loadFrontend({ fields = {}, routes = [], keep = [] } = {}) {
     Date, Math, JSON, Promise, Array, Object, String, Number, Set, Map, RegExp, Error,
     encodeURIComponent, decodeURIComponent, parseInt, parseFloat, isNaN,
   });
-  for (const s of scripts) vm.runInContext(s, context, { filename: "index.html" });
+  // Um arquivo por vez, no mesmo contexto, como o navegador: uma função usada
+  // ao carregar antes de o arquivo que a define existir quebra aqui também.
+  for (const s of scripts) vm.runInContext(s.code, context, { filename: s.file });
 
   // Neutraliza o que redesenha a tela; o teste só observa as chamadas de API.
   const stubs = {

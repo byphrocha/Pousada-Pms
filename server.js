@@ -2132,6 +2132,9 @@ app.get("/calendar/:roomId.ics", trackFeed("legado"), async (req, res) => {
 });
 
 app.use(express.static(path.join(__dirname, "build")));
+// Arquivo de tela que não existe (js/css/ícones) → 404, nunca a página no lugar:
+// HTML servido como script falha em silêncio e deixa a tela pela metade.
+app.get(/^\/(js|css|icons)\//, (req, res) => res.status(404).type("text/plain").send("Arquivo não encontrado"));
 
 // ── Fallback SPA ──────────────────────────────────────────────────────────────
 app.get("*", (req, res) => {

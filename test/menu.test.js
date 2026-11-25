@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { loadFrontend } = require("./helpers/frontend-harness");
 
-const html = fs.readFileSync(path.join(__dirname, "../build/index.html"), "utf8");
+const html = require("./helpers/frontend-source").fullPage();
 const sidebar = html.slice(html.indexOf('<div id="sidebar">'), html.indexOf('<div id="main">'));
 const buttons = [...sidebar.matchAll(/<button class="nav-btn([^"]*)"[^>]*data-view="([^"]+)"[^>]*>([\s\S]*?)<\/button>/g)]
   .map(m => ({ cls: m[1], view: m[2], lbl: (m[3].match(/class="lbl">([^<]+)</) || [])[1] }));

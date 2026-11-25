@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const { loadFrontend } = require("./helpers/frontend-harness");
 
-const html = fs.readFileSync(path.join(__dirname, "../build/index.html"), "utf8");
+const html = require("./helpers/frontend-source").fullPage();
 
 test("nenhum rótulo com espaçamento de caixa alta nos estilos inline", () => {
   const inline = [...html.matchAll(/style="[^"]*letter-spacing:\.(0[5-9]|1)\d*em/g)];
