@@ -1203,8 +1203,8 @@ async function notifyNewConflicts(status) {
   if (!vapidConfig()) return;
   const { data, error } = await supabase.from("settings").select("value").eq("key", PUSH_NOTIFIED_KEY).maybeSingle();
   if (error) { console.error(`[push] falha ao ler avisos já enviados: ${error.code || error.message}`); return; }
-  const { fresh, notified } = pushAlerts.diffConflicts(status, data && data.value && data.value.keys);
-  for (const c of fresh) await pushToAll(pushAlerts.conflictMessage(c));
+  const { messages, notified } = pushAlerts.diffAlerts(status, Date.now(), data && data.value && data.value.keys);
+  for (const m of messages) await pushToAll(m);
   const { error: e2 } = await supabase.from("settings").upsert({ key: PUSH_NOTIFIED_KEY, value: { keys: notified } });
   if (e2) console.error(`[push] falha ao registrar avisos enviados: ${e2.code || e2.message}`);
 }

@@ -234,3 +234,64 @@ test("chaves do Render que não formam par: avisos ficam desligados (não envia 
   try { assert.deepEqual((await call("GET", "/push/config", ADMIN())).body, { enabled: false, publicKey: null }); }
   finally { delete process.env.VAPID_PUBLIC_KEY; delete process.env.VAPID_PRIVATE_KEY; }
 }));
+
+// ── calendário parado ────────────────────────────────────────────────────────
+const H = 3600 * 1000;
+const NOW = Date.UTC(2030, 0, 10, 12);
+const iso = (ms) => new Date(ms).toISOString();
+const status = (feeds) => ({ lastRunAt: iso(NOW - 60000), feeds });
+
+test("parado: avisa depois de 1 h sem sucesso, uma vez, com o motivo; antes de 1 h não", () => {
+  const st = status({ "airbnb/22": { problem: "HTTP 503", lastSuccessAt: iso(NOW - 2 * H), conflicts: [] },
+                      "booking/20": { problem: "HTTP 503", lastSuccessAt: iso(NOW - 0.5 * H), conflicts: [] } });
+  const d1 = pa.diffAlerts(st, NOW, []);
+  assert.deepEqual(d1.messages, [{ title: "⚠️ Calendário parado",
+    body: "Airbnb quarto 22 sem atualizar há mais de 1 h (HTTP 503). Reservas novas desse anúncio podem não estar na PMS: confira na plataforma." }]);
+  assert.deepEqual(d1.notified, ["stale|airbnb/22"]);
+  assert.deepEqual(pa.diffAlerts(st, NOW, d1.notified).messages, [], "não repete");
+});
+
+test("parado com conflito: só o aviso de conflito (não dois avisos para a mesma coisa)", () => {
+  const st = status({ "airbnb/22": { problem: "conflito com outra reserva", lastSuccessAt: iso(NOW - 3 * H),
+    conflicts: [{ room: "22", checkIn: "2030-02-02", checkOut: "2030-02-04" }] } });
+  const d = pa.diffAlerts(st, NOW, []);
+  assert.equal(d.messages.length, 1);
+  assert.equal(d.messages[0].title, "⚠️ Possível overbooking");
+});
+
+test("voltou: avisa que normalizou; calendário removido da configuração não avisa", () => {
+  const ok = status({ "airbnb/22": { problem: null, lastSuccessAt: iso(NOW - 60000), conflicts: [] } });
+  assert.deepEqual(pa.diffAlerts(ok, NOW, ["stale|airbnb/22"]).messages,
+    [{ title: "✅ Calendário voltou", body: "Airbnb quarto 22 voltou a atualizar normalmente." }]);
+  assert.deepEqual(pa.diffAlerts(ok, NOW, ["stale|airbnb/22"]).notified, []);
+  assert.deepEqual(pa.diffAlerts(status({}), NOW, ["stale|airbnb/CF"]).messages, []);
+  const aindaFalhando = status({ "airbnb/22": { problem: "HTTP 503", lastSuccessAt: iso(NOW - 0.2 * H), conflicts: [] } });
+  assert.deepEqual(pa.diffAlerts(aindaFalhando, NOW, ["stale|airbnb/22"]).messages, [], "sem problema resolvido, não diz que voltou");
+});
+
+test("Casa Fechada e suíte com nome amigável; sincronização que nunca rodou não avisa", () => {
+  assert.match(pa.staleMessage({ feed: "airbnb/CF", problem: null }).body, /^Airbnb Casa Fechada sem atualizar há mais de 1 h\. /);
+  assert.match(pa.staleMessage({ feed: "airbnb/11+12", problem: "tempo esgotado" }).body, /^Airbnb Suíte 11\+12 .*\(tempo esgotado\)/);
+  assert.deepEqual(pa.diffAlerts(null, NOW, []).messages, []);
+  assert.deepEqual(pa.diffAlerts({ feeds: { "airbnb/22": { problem: null, lastSuccessAt: null, conflicts: [] } } }, NOW, []).messages, [],
+    "status sem nenhuma passada registrada não é 'parado'");
+});
+
+test("ponta a ponta: calendário falhando há mais de 1 h vira aviso no celular uma vez", withKeys(async () => {
+  const db = seed({ settings: [{ key: "ical_urls", value: { airbnb: { "22": URL_22 }, booking: {} } },
+    { key: "ical_sync_status", value: { lastRunAt: iso(Date.now() - 20 * 60000),
+      feeds: { "airbnb/22": { ok: false, problem: "HTTP 503", lastSuccessAt: iso(Date.now() - 2 * H), lastAttemptAt: iso(Date.now() - 20 * 60000), events: 0, conflicts: [] } } } }] });
+  await call("POST", "/push/subscribe", ADMIN(), { endpoint: EP });
+  const sent = pushRecorder();
+  _resetIcalStateForTests();
+  await runSync({ fetcher: async () => { throw new Error("HTTP 503"); } });
+  assert.equal(sent.length, 1);
+  const m = (await call("POST", "/push/inbox", null, { endpoint: EP })).body.messages;
+  assert.equal(m[0].title, "⚠️ Calendário parado");
+  await runSync({ fetcher: async () => { throw new Error("HTTP 503"); } });
+  assert.equal(sent.length, 1, "não repete");
+  await runSync({ fetcher: async () => "BEGIN:VCALENDAR\nEND:VCALENDAR" });
+  assert.equal(sent.length, 2);
+  assert.equal((await call("POST", "/push/inbox", null, { endpoint: EP })).body.messages[0].title, "✅ Calendário voltou");
+  assert.deepEqual(setting(db, "push_notified").keys, []);
+}));
