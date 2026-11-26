@@ -24,6 +24,10 @@ document.addEventListener("visibilitychange", () => {
   loadAll();
 });
 if (authToken) {
+  // Login salvo: esconde a tela de login. Antes ela ficava por cima da PMS e
+  // pedia usuário e senha a cada abertura do app. Se a sessão tiver expirado,
+  // a primeira chamada responde 401 e api() mostra o login de novo.
+  hideLoginScreen();
   applyRole();
   loadAll().catch(() => { clearAuth(); showLoginScreen(); });
   startAutoRefresh();
