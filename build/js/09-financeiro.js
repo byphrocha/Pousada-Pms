@@ -60,17 +60,17 @@ function renderFinanceiro() {
   </div>
 
   <!-- KPIs -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
-    <div style="background:var(--bg1);border:1px solid #22c55e44;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:13px;color:#22c55e;font-weight:700;margin-bottom:6px">Receitas</div>
+  <div class="fin-kpis">
+    <div class="fin-kpi-card" style="border-color:#22c55e44">
+      <div class="fin-kpi-label" style="color:#22c55e">Receitas</div>
       <div class="fin-kpi" style="font-weight:700;color:#22c55e;font-family:'Fraunces',serif">${fmtMoney(totIn)}</div>
     </div>
-    <div style="background:var(--bg1);border:1px solid #ef444444;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:13px;color:#ef4444;font-weight:700;margin-bottom:6px">Despesas</div>
+    <div class="fin-kpi-card" style="border-color:#ef444444">
+      <div class="fin-kpi-label" style="color:#ef4444">Despesas</div>
       <div class="fin-kpi" style="font-weight:700;color:#ef4444;font-family:'Fraunces',serif">${fmtMoney(totOut)}</div>
     </div>
-    <div style="background:var(--bg1);border:1px solid ${balance>=0?"#3b82f6":"#f59e0b"}44;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:13px;color:${balance>=0?"#3b82f6":"#f59e0b"};font-weight:700;margin-bottom:6px">Saldo</div>
+    <div class="fin-kpi-card" style="border-color:${balance>=0?"#3b82f6":"#f59e0b"}44">
+      <div class="fin-kpi-label" style="color:${balance>=0?"#3b82f6":"#f59e0b"}">Saldo</div>
       <div class="fin-kpi" style="font-weight:700;color:${balance>=0?"#3b82f6":"#f59e0b"};font-family:'Fraunces',serif">${fmtMoney(balance)}</div>
     </div>
   </div>
@@ -81,7 +81,7 @@ function renderFinanceiro() {
   ${renderFinChart(income, expense)}
 
   <!-- Listas -->
-  <div class="fin-lists" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
+  <div class="fin-lists">
     ${renderFinList("income", income)}
     ${renderFinList("expense", expense)}
   </div>`;
@@ -129,11 +129,11 @@ function renderFinChart(income, expense) {
     const info = FIN_CATEGORIES[cat] || {label:cat, icon:"•"};
     return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <div style="font-size:13px;width:20px;text-align:center">${info.icon}</div>
-      <div style="font-size:11px;color:var(--mu);width:120px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${info.label}</div>
+      <div class="fin-bar-label">${info.label}</div>
       <div style="flex:1;background:var(--bg0);border-radius:4px;height:16px;overflow:hidden">
         <div style="height:100%;width:${pct}%;background:${color};border-radius:4px;transition:width .3s"></div>
       </div>
-      <div style="font-size:11px;font-weight:600;color:var(--tx);width:90px;text-align:right;flex-shrink:0">${fmtMoney(val)}</div>
+      <div class="fin-bar-value">${fmtMoney(val)}</div>
     </div>`;
   };
 
@@ -171,7 +171,7 @@ function renderFinList(type, list) {
             background:var(--bg0);border-radius:8px;cursor:pointer" ${click}>
             <span style="font-size:16px">${cat.icon}</span>
             <div style="flex:1;min-width:0">
-              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.readonly ? "💳 " : ""}${esc(t.description)}</div>
+              <div class="fin-desc">${t.readonly ? "💳 " : ""}${esc(t.description)}</div>
               <div style="font-size:10px;color:var(--mu);margin-top:1px">${esc(cat.label)} · ${esc(fmtDate(t.date))}${t.readonly ? " · via reserva" : ""}</div>
             </div>
             <div style="font-size:13px;font-weight:700;color:${color};flex-shrink:0">${fmtMoney(t.amount)}</div>
