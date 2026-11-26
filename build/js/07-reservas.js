@@ -192,7 +192,7 @@ function resRow(r) {
         ${isSuite?`<span class="pill" style="background:#f59e0b22;color:#f59e0b">🔗 suíte</span>`:""}
       </div>
       <div style="font-size:11px;color:var(--mu);margin-top:3px">
-        ${room?.type||""} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}
+        ${room?.type||""} · ${fmtRange(r.checkIn, r.checkOut)}
         · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>
         ${r.phone?` · ${esc(r.phone)}`:""}    
       </div>

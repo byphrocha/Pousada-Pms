@@ -56,7 +56,7 @@ function renderPreReservas() {
           </div>
           <div style="font-size:11px;color:var(--mu);margin-top:3px">
             ${room ? room.type+" · " : ""}
-            ${p.check_in ? fmtDate(p.check_in)+" → "+fmtDate(p.check_out) : "Datas não definidas"}
+            ${p.check_in ? fmtRange(p.check_in, p.check_out) : "Datas não definidas"}
             ${n > 0 ? ` · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>` : ""}
             ${p.phone ? ` · 📞 ${esc(p.phone)}` : ""}
           </div>

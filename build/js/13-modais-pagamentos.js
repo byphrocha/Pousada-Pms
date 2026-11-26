@@ -325,7 +325,7 @@ function reservationForm(r, isEdit) {
   </div>` : ""}
   <div class="field"><label>Observações</label>
     <textarea id="f-notes">${esc(r.notes||"")}</textarea></div>
-  ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
+  ${n>0?`<div style="font-size:12px;color:var(--dm);margin-bottom:16px">📅 ${fmtRange(r.checkIn, r.checkOut)} · <b style="color:var(--tx)">${n} noite${n!==1?"s":""}</b></div>`:""}
   <div style="display:flex;gap:10px;justify-content:flex-end">
     ${isEdit?`<button class="btn btn-red" onclick="cancelReservation('${r.id}')">Cancelar Reserva</button>`:""}
     <button class="btn btn-green" onclick="submitForm(${isEdit?`'${r.id}'`:"null"})">
@@ -533,7 +533,7 @@ async function submitForm(id) {
       id:          genId(),
       type:        "income",
       category:    "reserva_direta",
-      description: `Reserva Qto ${form.roomId === "CF" ? "Casa Fechada" : form.roomId} — ${form.guestName}`,
+      description: `Reserva Qto ${form.roomId === "CF" ? productName("CF") : form.roomId} — ${form.guestName}`,
       amount:      form.amount,
       date:        form.checkIn,
       month:       form.checkIn.slice(0,7),

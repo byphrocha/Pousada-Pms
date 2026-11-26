@@ -166,7 +166,7 @@ function renderCalendario() {
     const w = b.span * COL - (b.clipLeft ? 0 : 3) - (b.clipRight ? 0 : 3);
     const icon = b.kind === "cf" ? "🏡 " : b.kind === "suite" ? "🔗 " : "";
     const label = b.block ? "Bloqueio" : guestDisplay(b).text;
-    const roomTxt = b.kind === "cf" ? "Casa Fechada" : b.kind === "suite" ? "Suíte 11+12" : "Quarto " + b.roomId;
+    const roomTxt = productName(b.kind === "cf" ? "CF" : b.kind === "suite" ? "11+12" : b.roomId, { cap: true });
     const tip = `${label} — ${roomTxt} — ${fmtDate(b.checkIn)} a ${fmtDate(b.checkOut)} (${nights(b.checkIn, b.checkOut)} noite(s))` +
       `${b.source ? " — " + b.source : ""}${b.pending ? " — pendente (não bloqueia)" : ""}${b.conflict ? " — CONFLITO" : ""}`;
     grid += `<div class="cal-bar" data-ids="${esc(b.ids.join(","))}" onclick="openEditModal('${esc(b.id)}')" title="${esc(tip)}"

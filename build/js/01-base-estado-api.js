@@ -33,6 +33,15 @@ const todayStr  = () => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 };
 const fmtDate   = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+// Faixa de datas "dd/mm/aaaa → dd/mm/aaaa" (um lugar só para todas as telas).
+const fmtRange  = (a, b) => `${fmtDate(a)} → ${fmtDate(b)}`;
+// Nome do produto para textos da tela: "Casa Fechada", "suíte 11+12" ou "quarto N".
+// cap: "Suíte"/"Quarto" com maiúscula; article: "a Casa Fechada", "o quarto N".
+function productName(id, { cap = false, article = false } = {}) {
+  const s = String(id);
+  const name = s === "CF" ? "Casa Fechada" : s === "11+12" ? (cap ? "Suíte 11+12" : "suíte 11+12") : (cap ? "Quarto " : "quarto ") + s;
+  return article ? (s === "CF" || s === "11+12" ? "a " : "o ") + name : name;
+}
 const fmtMonth  = s => s ? new Date(s+"T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"}) : "";
 const genId     = () => Math.random().toString(36).slice(2,10);
 const nights    = (ci,co) => Math.max(0,Math.round((new Date(co)-new Date(ci))/86400000));
@@ -362,7 +371,7 @@ function fmtWhen(iso) {
 function echoNote(echoes) {
   if (!Array.isArray(echoes) || !echoes.length) return null;
   return "ℹ️ Datas que a plataforma devolveu fechadas depois de receber da PMS: " +
-    echoes.map(e => `${feedLabel(e.feed).split(" ")[0]} ${e.room === "CF" ? "Casa Fechada" : e.room === "11+12" ? "suíte 11+12" : "quarto " + e.room}, ${fmtDate(e.checkIn)} → ${fmtDate(e.checkOut)}`).join("; ") +
+    echoes.map(e => `${feedLabel(e.feed).split(" ")[0]} ${productName(e.room)}, ${fmtRange(e.checkIn, e.checkOut)}`).join("; ") +
     ". Já estão ocupadas na PMS, por isso não entram de novo. Se alguma for reserva de verdade no extranet, é overbooking: resolva na plataforma.";
 }
 
@@ -375,7 +384,7 @@ function syncWarning() {
   const conflicts = (h.failing || []).flatMap(f => (f.conflicts || []).map(c => ({ ...c, feed: f.feed })));
   if (conflicts.length)
     parts.push("⛔ Possível overbooking — reserva (ou mudança de datas) da plataforma NÃO foi aplicada no PMS porque há quarto ocupado: " +
-      conflicts.map(c => `${feedLabel(c.feed).split(" ")[0]} ${c.room === "CF" ? "Casa Fechada" : c.room === "11+12" ? "suíte 11+12" : "quarto " + c.room}, ${fmtDate(c.checkIn)} → ${fmtDate(c.checkOut)}`).join("; ") +
+      conflicts.map(c => `${feedLabel(c.feed).split(" ")[0]} ${productName(c.room)}, ${fmtRange(c.checkIn, c.checkOut)}`).join("; ") +
       ". Confira na plataforma e resolva.");
   const otherFailing = (h.failing || []).filter(f => !(f.conflicts || []).length);
   if (otherFailing.length)
@@ -529,7 +538,7 @@ function confirmCapacity(roomId, adults, children, previous) {
   const n = (Number(adults) || 0) + (Number(children) || 0);
   if (!cap || n <= cap) return true;
   if (previous && n <= (Number(previous.adults) || 0) + (Number(previous.children) || 0)) return true;
-  const where = roomId === "CF" ? "a Casa Fechada" : roomId === "11+12" ? "a suíte 11+12" : `o quarto ${roomId}`;
+  const where = productName(roomId, { article: true });
   return confirm(`Atenção: ${n} hóspedes para ${where}, que comporta ${cap}. Salvar mesmo assim?`);
 }
 

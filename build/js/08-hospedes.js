@@ -119,7 +119,7 @@ function openGuestModal(guestId) {
       ${guestRes.slice(0,5).map(r=>`
         <div style="background:var(--bg0);border-radius:8px;padding:8px 12px;margin-bottom:6px;
           font-size:12px;display:flex;justify-content:space-between;align-items:center">
-          <span>Qto ${esc(r.roomId)} · ${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</span>
+          <span>Qto ${esc(r.roomId)} · ${fmtRange(r.checkIn, r.checkOut)}</span>
           <span style="color:var(--mu)">${esc(r.source)}</span>
         </div>`).join("")}
     </div>` : ""}
