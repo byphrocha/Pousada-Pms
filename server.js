@@ -1691,7 +1691,8 @@ async function resolveContract(reservationId) {
 // Reserva direta que NÃO é Casa Fechada: considera-se paga. Ao salvar com valor,
 // a PMS registra um pagamento integral ("pagamento", autor "automático") na data
 // do registro; ele aparece no Financeiro e nos relatórios e pode ser estornado.
-// Mudar o valor ajusta esse pagamento; valor zero ou pré-reserva o remove;
+// Mudar o valor ajusta esse pagamento; valor zero, pré-reserva ou origem trocada
+// para Airbnb/Booking o remove;
 // cancelar mantém (pode ter havido recebimento: estorno é decisão do Paulo).
 // Se alguém registrou pagamento à mão, a PMS não mexe em nada.
 // Casa Fechada direta continua com sinal/parcelas registrados à mão.
@@ -1706,14 +1707,15 @@ async function syncAutoPayment(req, reservationId) {
     const { data: extra, error: xErr } = await supabase.from("reservations").select("group_id, payment").eq("id", lead.id).maybeSingle();
     if (xErr) return "erro";
     const isCF = c.group.length >= 9 || String((extra && extra.group_id) || "").startsWith("cf:") || /\[Casa toda:/.test(String(lead.notes || ""));
-    if (lead.source !== "direto" || isCF) return null;
     const { data: pays, error } = await supabase.from("payments").select("id, amount, created_by").eq("reservation_id", lead.id);
     if (error) return "erro";
     const list = pays || [];
     if (list.some(p => p.created_by !== AUTO_PAY_BY)) return null;
     const auto = list[0] || null;
     const amount = Math.round((Number(lead.amount) || 0) * 100) / 100;
-    if (!(lead.status === "confirmed" && amount > 0)) {
+    // Deixou de valer (origem trocada para Airbnb/Booking, virou Casa Fechada,
+    // valor zero ou pré-reserva): o pagamento automático sai do caixa.
+    if (!(lead.source === "direto" && !isCF && lead.status === "confirmed" && amount > 0)) {
       if (auto && lead.status !== "cancelled") {
         const { error: dErr } = await supabase.from("payments").delete().eq("id", auto.id);
         if (dErr) return "erro";

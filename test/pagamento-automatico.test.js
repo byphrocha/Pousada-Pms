@@ -136,3 +136,23 @@ test("reserva que volta a ser pré-reserva (pendente) perde o pagamento automát
   await call("PUT", "/reservations/p1", { status: "pending" });
   assert.equal(pagos(db, "p1").length, 0);
 });
+
+test("reserva que deixa de ser direta (origem trocada para Airbnb/Booking) perde o pagamento automático", async () => {
+  const db = banco();
+  await call("POST", "/reservations", { ...NOVA, id: "o1" });
+  assert.equal(pagos(db, "o1").length, 1);
+  const r = await call("PUT", "/reservations/o1", { source: "booking" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.warning, undefined);
+  assert.equal(pagos(db, "o1").length, 0, "a plataforma cobra: o pagamento automático não pode ficar no caixa");
+  assert.ok(db.tables.audit_log.some(a => a.action === "pagamento.excluir" && a.changes.automatico === true));
+  await call("PUT", "/reservations/o1", { source: "direto" });
+  assert.deepEqual(pagos(db, "o1").map(p => Number(p.amount)), [450], "voltou a ser direta: registra de novo");
+});
+
+test("origem trocada com pagamento à mão: nada é apagado", async () => {
+  const db = banco([{ id: "o2", room_id: "21", source: "direto", status: "confirmed", guest_name: "T", amount: 450, check_in: "2099-04-01", check_out: "2099-04-02" }],
+    [{ id: "pm2", reservation_id: "o2", kind: "sinal", amount: 100, method: "pix", paid_at: "2099-03-01", created_by: "admin" }]);
+  await call("PUT", "/reservations/o2", { source: "airbnb" });
+  assert.deepEqual(pagos(db, "o2").map(p => p.id), ["pm2"]);
+});
