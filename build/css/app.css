@@ -53,7 +53,7 @@ input,select,textarea{font-family:inherit}
 
 /* Room grid */
 .room-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:12px}
-.room-card{--sc:var(--gr);background:var(--bg2);border:1px solid var(--bd);border-top:4px solid var(--sc);border-radius:14px;padding:12px 12px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;position:relative;user-select:none;transition:border-color .15s,background .15s}
+.room-card{--sc:var(--gr);min-width:0;background:var(--bg2);border:1px solid var(--bd);border-top:4px solid var(--sc);border-radius:14px;padding:12px 12px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;position:relative;user-select:none;transition:border-color .15s,background .15s}
 .room-card:hover{background:var(--bg3);border-color:var(--bdh);border-top-color:var(--sc)}
 .rc-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .room-num{font-family:'Fraunces',serif;font-size:26px;font-weight:700;line-height:1;color:var(--tx)}
@@ -135,11 +135,11 @@ input,select,textarea{font-family:inherit}
 
 /* Suite */
 .suite-wrapper{display:contents}
-.suite-group{grid-column:span 2;display:flex;flex-direction:column;gap:4px;
+.suite-group{grid-column:span 2;min-width:0;display:flex;flex-direction:column;gap:4px;
   border:1.5px dashed #f59e0b66;border-radius:16px;padding:10px;position:relative;background:#2b1e0a33}
 .suite-label{font-size:12px;color:#f59e0b;font-weight:700;text-align:left;margin:0 2px 4px}
 .suite-rooms{display:flex;gap:10px}
-.suite-rooms .room-card{flex:1}
+.suite-rooms .room-card{flex:1;min-width:0}
 .suite-join-btn{font-size:12px;padding:8px 10px;border-radius:7px;border:1px solid #f59e0b;
   background:#2b1e0a;color:#f59e0b;cursor:pointer;font-family:inherit;
   font-weight:700;text-align:center;margin-top:2px;transition:background .15s;width:100%}
@@ -173,14 +173,15 @@ input,select,textarea{font-family:inherit}
   #content{padding:14px}
 
   /* KPIs: 3 por linha */
-  .kpi-grid{grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+  .kpi-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-bottom:14px}
   .kpi{padding:9px 6px;text-align:center;border-radius:12px}
   .kpi .val{font-size:21px}
   .kpi .lbl{font-size:10px;flex-direction:column;gap:3px;line-height:1.15}
   .room-grid ~ .legend, .kpi-grid ~ .legend{display:none}
 
-  /* Room grid: menor */
-  .room-grid{grid-template-columns:repeat(3,1fr);gap:8px}
+  /* Room grid: menor. minmax(0,1fr): nome longo de hóspede não alarga a coluna
+     (antes o 1º cartão chegava a ~400 px e o Mapa rolava para o lado). */
+  .room-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
   .room-card{padding:8px 8px 9px;gap:4px;border-radius:12px}
   .rc-top{flex-direction:column;align-items:flex-start;gap:4px}
   .room-num{font-size:21px}
