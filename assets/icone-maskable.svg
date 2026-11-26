@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Ícone da PMS: a pousada com os 9 quartos de luz acesa. Gerar PNGs: scripts/gerar-icones.sh -->
+  <defs>
+    <radialGradient id="ceu" cx="50%" cy="36%" r="72%">
+      <stop offset="0" stop-color="#18233f"/><stop offset="1" stop-color="#0b1020"/>
+    </radialGradient>
+    <filter id="brilho" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="12" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#ceu)"/>
+  <g transform="translate(512 530) scale(0.82) translate(-512 -530)">
+  <!-- fachada -->
+  <rect x="262" y="430" width="500" height="430" rx="24" fill="#33405e"/>
+  <!-- telhado -->
+  <path d="M190 452 L512 200 L834 452" fill="none" stroke="#3b82f6" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- divisões dos andares -->
+  <g fill="#283350"><rect x="262" y="598" width="500" height="10"/><rect x="262" y="724" width="500" height="10"/></g>
+  <!-- 9 quartos: 3 andares de 3 janelas, luzes acesas -->
+  <g fill="#fbbf24" filter="url(#brilho)">
+    <rect x="322" y="482" width="76" height="98" rx="12"/><rect x="474" y="482" width="76" height="98" rx="12"/><rect x="626" y="482" width="76" height="98" rx="12"/>
+    <rect x="322" y="616" width="76" height="98" rx="12"/><rect x="474" y="616" width="76" height="98" rx="12"/><rect x="626" y="616" width="76" height="98" rx="12"/>
+    <rect x="322" y="742" width="76" height="98" rx="12"/><rect x="474" y="742" width="76" height="98" rx="12"/><rect x="626" y="742" width="76" height="98" rx="12"/>
+  </g>
+  </g>
+</svg>
