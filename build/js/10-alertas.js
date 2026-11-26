@@ -80,7 +80,7 @@ function renderAlertas() {
             padding:6px 12px;font-weight:800;font-size:16px;color:#ef4444">${esc(a.roomId)}</div>
           <div>
             <div style="font-weight:700;font-size:13px;color:#ef4444">Overbooking no Quarto ${esc(a.roomId)}</div>
-            <div style="font-size:11px;color:var(--mu);margin-top:2px">${room?.type||""} · Sobreposição: ${fmtDate(overlapStart)} → ${fmtDate(overlapEnd)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:2px">${room?.type||""} · Sobreposição: ${fmtRange(overlapStart, overlapEnd)}</div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -89,7 +89,7 @@ function renderAlertas() {
             border-left:3px solid ${i===0?srcA:srcB}">
             <div style="font-size:12px;color:${i===0?srcA:srcB};font-weight:700;margin-bottom:4px">${esc(r.source)}</div>
             <div style="font-weight:700;font-size:13px">${esc(r.guestName)}</div>
-            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(r.checkIn)} → ${fmtDate(r.checkOut)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtRange(r.checkIn, r.checkOut)}</div>
             ${r.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(r.phone)}</div>` : ""}
             <button onclick="openEditModal('${esc(r.id)}')"
               style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
@@ -116,7 +116,7 @@ function renderAlertas() {
           <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;border-left:3px solid #f59e0b">
             <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:4px">Pré-reserva</div>
             <div style="font-weight:700;font-size:13px">${esc(pre.guest_name||"")}</div>
-            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(pre.check_in)} → ${fmtDate(pre.check_out)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtRange(pre.check_in, pre.check_out)}</div>
             ${pre.phone ? `<div style="font-size:11px;color:var(--dm);margin-top:2px">📞 ${esc(pre.phone)}</div>` : ""}
             <button onclick="openPreReservaModal('${esc(pre.id)}')"
               style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
@@ -127,7 +127,7 @@ function renderAlertas() {
           <div style="background:var(--bg0);border-radius:8px;padding:10px 12px;border-left:3px solid ${srcClr}">
             <div style="font-size:10px;color:${srcClr};font-weight:700;margin-bottom:4px">${esc(clash.source)}: confirmada</div>
             <div style="font-weight:700;font-size:13px">${esc(clash.guestName)}</div>
-            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtDate(clash.checkIn)} → ${fmtDate(clash.checkOut)}</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">${fmtRange(clash.checkIn, clash.checkOut)}</div>
             <button onclick="openEditModal('${esc(clash.id)}')"
               style="margin-top:8px;font-size:10px;padding:4px 10px;border-radius:6px;
               border:1px solid var(--bd);background:var(--bg2);color:var(--tx);cursor:pointer;font-family:inherit">

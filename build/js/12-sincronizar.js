@@ -375,7 +375,7 @@ function renderFeedInventory() {
     .sort((a, b) => (a.variant + a.room).localeCompare(b.variant + b.room))
     .flatMap(f => Object.entries(f.agents || {}).map(([agent, a]) => `<tr>
       <td>${esc(feedVariantLabel(f.variant))}</td>
-      <td>${esc(f.room === "CF" ? "Casa Fechada" : f.room)}</td><td>${esc(agent)}</td>
+      <td>${esc(f.room === "CF" ? productName("CF") : f.room)}</td><td>${esc(agent)}</td>
       <td style="text-align:right">${Number(a.count) || 0}</td>
       <td>${esc(new Date(a.lastAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }))}</td>
       <td>${a.lastStatus === 200 ? "ok" : esc(String(a.lastStatus))}</td></tr>`)).join("");

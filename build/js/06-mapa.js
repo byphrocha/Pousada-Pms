@@ -92,7 +92,7 @@ function renderMap() {
       <div>
         <div style="font-size:13px;font-weight:700;color:#3b82f6">Casa Fechada</div>
         <div style="font-size:11px;color:var(--mu);margin-top:2px">
-          ${esc(cfAtiva.guestName)} · ${fmtDate(cfAtiva.checkIn)} → ${fmtDate(cfAtiva.checkOut)}
+          ${esc(cfAtiva.guestName)} · ${fmtRange(cfAtiva.checkIn, cfAtiva.checkOut)}
         </div>
       </div>
       <span class="pill" style="background:#3b82f622;color:#3b82f6;margin-left:auto">CF</span>
