@@ -40,22 +40,25 @@ function renderCalUrls() {
   return calUrlRowsHtml(calChannels) + calGeneralUrlsHtml(calUrls);
 }
 
+// Uma linha "nome · link · Copiar" (links gerais e por plataforma).
+function copyUrlRow(label, url) {
+  return `<div class="url-row">
+      <div class="url-label">${esc(label)}</div>
+      <input readonly value="${esc(url)}" class="url-input" onclick="this.select()" title="Clique para selecionar">
+      <button class="btn" onclick="copyCalUrl('${esc(url)}')">Copiar</button>
+    </div>`;
+}
+
 // Links gerais (todas as origens) continuam existindo para não quebrar nada já
 // cadastrado (regra 3), mas ficam recolhidos: num anúncio de OTA eles devolvem
 // as reservas do próprio anúncio.
 function calGeneralUrlsHtml(urls) {
   const order = ["CF", "11+12", "10", "11", "12", "20", "21", "22", "23", "24", "25"];
-  const rows = order.filter(id => urls[id]).map(id => `<div style="display:flex;align-items:center;gap:8px">
-      <div style="width:96px;font-size:12px;font-weight:700;color:var(--bl);flex-shrink:0">${esc(CAL_PRODUCT_LABEL[id] || "Qto " + id)}</div>
-      <input readonly value="${esc(urls[id])}" style="flex:1;min-width:0;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
-        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);cursor:pointer"
-        onclick="this.select()" title="Clique para selecionar">
-      <button class="btn" onclick="copyCalUrl('${esc(urls[id])}')">Copiar</button>
-    </div>`).join("");
+  const rows = order.filter(id => urls[id]).map(id => copyUrlRow(CAL_PRODUCT_LABEL[id] || "Qto " + id, urls[id])).join("");
   if (!rows) return "";
   return `<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:var(--dm)">Links gerais por quarto (todas as origens)</summary>
     <div style="font-size:12px;color:var(--dm);margin:8px 0;line-height:1.6">Para uso fora das plataformas. Não cole estes links num anúncio do Booking ou do Airbnb: eles incluem as reservas do próprio anúncio.</div>
-    <div style="display:flex;flex-direction:column;gap:6px">${rows}</div></details>`;
+    <div class="stack">${rows}</div></details>`;
 }
 
 // Uma linha por anúncio que existe em cada plataforma (Booking: 20, 22, 24;
@@ -64,18 +67,12 @@ function calGeneralUrlsHtml(urls) {
 const CAL_PRODUCT_LABEL = { CF: "🏡 Casa Fechada", "11+12": "🔗 Suíte 11+12" };
 function calUrlRowsHtml(channels) {
   if (!channels) return `<div style="color:var(--mu);font-size:12px">Nenhum link disponível.</div>`;
-  const row = (id, url) => `<div style="display:flex;align-items:center;gap:8px">
-      <div style="width:96px;font-size:12px;font-weight:700;color:var(--bl);flex-shrink:0">${esc(CAL_PRODUCT_LABEL[id] || "Quarto " + id)}</div>
-      <input readonly value="${esc(url)}" style="flex:1;min-width:0;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
-        color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);cursor:pointer"
-        onclick="this.select()" title="Clique para selecionar">
-      <button class="btn" onclick="copyCalUrl('${esc(url)}')">Copiar</button>
-    </div>`;
+  const row = (id, url) => copyUrlRow(CAL_PRODUCT_LABEL[id] || "Quarto " + id, url);
   let s = "";
   for (const [ch, title] of [["booking", "Para colar no Booking"], ["airbnb", "Para colar no Airbnb"]]) {
     const list = Object.entries(channels[ch] || {});
     s += `<div style="font-size:13px;font-weight:700;margin:12px 0 8px">${title}</div>`;
-    s += list.length ? `<div style="display:flex;flex-direction:column;gap:6px">${list.map(([id, url]) => row(id, url)).join("")}</div>`
+    s += list.length ? `<div class="stack">${list.map(([id, url]) => row(id, url)).join("")}</div>`
                      : `<div style="color:var(--mu);font-size:12px">Nenhum anúncio desta plataforma cadastrado em Sincronizar.</div>`;
   }
   s += `<div style="font-size:12px;color:var(--dm);margin-top:12px;line-height:1.6">

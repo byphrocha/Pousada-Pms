@@ -38,7 +38,7 @@ function renderRelatorios() {
   const tile = (label, value, sub, color) => `<div style="flex:1;min-width:150px;background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:14px">
     <div style="font-size:12px;color:var(--mu);font-weight:700">${label}</div>
     <div style="font-size:clamp(18px,5vw,24px);font-weight:700;white-space:nowrap;color:${color || "var(--tx)"};margin-top:4px">${value}</div>
-    <div style="font-size:11px;color:var(--mu);margin-top:2px">${sub}</div></div>`;
+    <div class="meta-tight">${sub}</div></div>`;
   const card = (title, body) => `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px">
     <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:10px">${title}</div>${body}</div>`;
   const chLabel = { direto: "Direto", airbnb: "Airbnb", booking: "Booking", outro: "Outro" };
