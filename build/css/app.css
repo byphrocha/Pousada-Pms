@@ -245,3 +245,13 @@ input,select,textarea{font-family:inherit}
 .login-box .err{color:#ef4444;font-size:12px;margin-bottom:10px;min-height:18px}
 .user-badge{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu);cursor:pointer}
 .user-badge:hover{color:var(--tx)}
+
+/* ── Blocos repetidos entre telas (PMS-017) — mesmas regras de antes, num lugar só ── */
+.card-panel{background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px}
+.meta{font-size:11px;color:var(--mu);margin-top:3px}
+.meta-tight{font-size:11px;color:var(--mu);margin-top:2px}
+.stack{display:flex;flex-direction:column;gap:6px}
+.url-row{display:flex;align-items:center;gap:8px}
+.url-label{width:96px;font-size:12px;font-weight:700;color:var(--bl);flex-shrink:0}
+.url-input{flex:1;min-width:0;background:var(--bg0);border:1px solid var(--bd);border-radius:6px;
+  color:var(--dm);padding:5px 10px;font-size:10px;outline:none;font-family:var(--mono);cursor:pointer}

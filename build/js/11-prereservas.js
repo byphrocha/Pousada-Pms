@@ -54,7 +54,7 @@ function renderPreReservas() {
             ${esc(p.guest_name||"Sem nome")}
             ${hasConflict ? `<span class="pill" style="background:#ef444422;color:#ef4444">⚠️ conflito</span>` : ""}
           </div>
-          <div style="font-size:11px;color:var(--mu);margin-top:3px">
+          <div class="meta">
             ${room ? room.type+" · " : ""}
             ${p.check_in ? fmtRange(p.check_in, p.check_out) : "Datas não definidas"}
             ${n > 0 ? ` · <b style="color:var(--dm)">${n} noite${n!==1?"s":""}</b>` : ""}

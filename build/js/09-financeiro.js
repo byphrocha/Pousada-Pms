@@ -137,7 +137,7 @@ function renderFinChart(income, expense) {
     </div>`;
   };
 
-  return `<div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
+  return `<div class="card-panel">
     <div style="font-size:13px;color:var(--mu);font-weight:700;margin-bottom:14px">Distribuição do mês</div>
     ${allInc.length ? `<div style="font-size:12px;color:#22c55e;font-weight:700;margin-bottom:8px">Entradas</div>
       ${allInc.map(([k,v])=>bar(k,v,"#22c55e")).join("")}` : ""}
@@ -152,13 +152,13 @@ function renderFinList(type, list) {
   const title    = isIncome ? "Entradas" : "Saídas";
 
   if (!list.length) return `
-    <div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
+    <div class="card-panel">
       <div style="font-size:13px;color:${color};font-weight:700;margin-bottom:12px">${title}</div>
       <div style="text-align:center;color:var(--mu);padding:24px 0;font-size:13px">Nenhum lançamento</div>
     </div>`;
 
   return `
-    <div style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px">
+    <div class="card-panel">
       <div style="font-size:13px;color:${color};font-weight:700;margin-bottom:12px">${title}</div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${list.map(t => {

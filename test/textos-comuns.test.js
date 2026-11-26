@@ -31,3 +31,27 @@ test("nenhuma tela monta mais o nome do produto ou a faixa de datas na mão", ()
   assert.doesNotMatch(page, /fmtDate\([^)]*\)\} → \$\{fmtDate/);
   assert.doesNotMatch(page, /fmtDate\([^)]*\)\+" → "\+fmtDate/);
 });
+
+test("blocos repetidos viraram classes CSS com as mesmas regras, e não voltam a ser escritos à mão", () => {
+  const fs = require("fs"), path = require("path");
+  const { BUILD, scripts } = require("./helpers/frontend-source");
+  const css = fs.readFileSync(path.join(BUILD, "css/app.css"), "utf8");
+  for (const [cls, rule] of [
+    ["card-panel", "background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px"],
+    ["meta", "font-size:11px;color:var(--mu);margin-top:3px"],
+    ["meta-tight", "font-size:11px;color:var(--mu);margin-top:2px"],
+    ["stack", "display:flex;flex-direction:column;gap:6px"],
+  ]) assert.ok(css.includes(`.${cls}{${rule}}`), cls);
+  const js = scripts().map(s => s.code).join("\n");
+  for (const inline of ['style="background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px"',
+    'style="font-size:11px;color:var(--mu);margin-top:3px"', 'style="font-size:11px;color:var(--mu);margin-top:2px"',
+    'style="width:96px;font-size:12px;font-weight:700;color:var(--bl);flex-shrink:0"'])
+    assert.ok(!js.includes(inline), inline);
+});
+
+test("linha de link (nome · link · Copiar): uma função só, com escape", () => {
+  const h = run(`copyUrlRow("Quarto <b>", "https://x.test/a\\"b")`);
+  assert.match(h, /class="url-row"/);
+  assert.match(h, /class="url-label">Quarto &lt;b&gt;</);
+  assert.doesNotMatch(h, /<b>/);
+});

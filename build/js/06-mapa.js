@@ -91,7 +91,7 @@ function renderMap() {
       <span style="font-size:24px">🏡</span>
       <div>
         <div style="font-size:13px;font-weight:700;color:#3b82f6">Casa Fechada</div>
-        <div style="font-size:11px;color:var(--mu);margin-top:2px">
+        <div class="meta-tight">
           ${esc(cfAtiva.guestName)} · ${fmtRange(cfAtiva.checkIn, cfAtiva.checkOut)}
         </div>
       </div>

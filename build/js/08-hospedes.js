@@ -66,7 +66,7 @@ function renderHospedes() {
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:14px">${esc(g.name)}</div>
-        <div style="font-size:11px;color:var(--mu);margin-top:3px">
+        <div class="meta">
           ${g.phone ? "📞 "+esc(g.phone) : ""}
           ${g.email ? " · ✉ "+esc(g.email) : ""}
           ${g.cpf   ? " · 🪪 "+esc(g.cpf)  : ""}
